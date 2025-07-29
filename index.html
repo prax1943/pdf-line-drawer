@@ -184,18 +184,44 @@
       };
     }
 
+    function clampOffsets() {
+      if (!pdfPageImage) return;
+
+      const maxOffsetX = 0;
+      const maxOffsetY = 0;
+
+      const imgWidthScaled = pdfPageImage.width * scale;
+      const imgHeightScaled = pdfPageImage.height * scale;
+
+      const minOffsetX = canvas.width - imgWidthScaled;
+      const minOffsetY = canvas.height - imgHeightScaled;
+
+      if (minOffsetX >= maxOffsetX) {
+        // ภาพเล็กกว่าหรือเท่ากับ canvas กว้าง
+        offsetX = (canvas.width - imgWidthScaled) / 2;
+      } else {
+        offsetX = Math.min(maxOffsetX, Math.max(minOffsetX, offsetX));
+      }
+
+      if (minOffsetY >= maxOffsetY) {
+        // ภาพเล็กกว่าหรือเท่ากับ canvas สูง
+        offsetY = (canvas.height - imgHeightScaled) / 2;
+      } else {
+        offsetY = Math.min(maxOffsetY, Math.max(minOffsetY, offsetY));
+      }
+    }
+
     function drawCurrentView() {
       if (!pdfPageImage) return;
 
-      // เคลียร์ canvas พร้อม reset transform ก่อนวาดใหม่
+      clampOffsets();
+
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // วาดภาพหน้า PDF พร้อม pan + zoom
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
       ctx.drawImage(pdfPageImage, 0, 0);
 
-      // วาดเส้นที่ขีดไว้บนหน้าปัจจุบัน
       ctx.strokeStyle = 'red';
       ctx.lineWidth = 2 / scale;
       ctx.font = `${18 / scale}px sans-serif`;
@@ -322,6 +348,7 @@
         panStartY = touches[0].clientY;
         offsetX += dx;
         offsetY += dy;
+        clampOffsets();
         drawCurrentView();
       } else if (touches.length === 2) {
         const dist = getDistance(touches);
@@ -338,6 +365,7 @@
           offsetY = centerY - ((centerY - offsetY) * (newScale / scale));
 
           scale = newScale;
+          clampOffsets();
           drawCurrentView();
         }
         lastDist = dist;
@@ -403,7 +431,7 @@
       }
     }
 
-    // บันทึก PDF เป็นไฟล์ (จะบันทึกหน้าเดียวในขนาด canvas ปัจจุบัน)
+    // บันทึก PDF เป็นไฟล์ (จะบันทึกทุกหน้าในขนาด canvas ปัจจุบัน)
     async function savePDF() {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
 
@@ -415,9 +443,16 @@
 
       for (let i = 1; i <= totalPages; i++) {
         await renderPage(i);
+
+        // ปรับ offset/scale ให้เหมาะสม (เริ่มต้น)
+        offsetX = 0;
+        offsetY = 0;
+        scale = 1;
+        clampOffsets();
+
         drawCurrentView();
 
-        // delay ให้แน่ใจว่าภาพโหลดเสร็จ
+        // รอให้ภาพโหลดเสร็จก่อนแปลง
         await new Promise(r => setTimeout(r, 200));
 
         const imgData = canvas.toDataURL('image/png');
