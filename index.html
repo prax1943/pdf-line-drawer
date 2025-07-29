@@ -37,6 +37,7 @@
       touch-action: none;
       user-select: none;
     }
+    /* Side controls */
     .controls-side {
       position: fixed;
       top: 50%;
@@ -86,6 +87,17 @@
       -webkit-user-select: none;
       user-select: none;
     }
+    input[type="file"] {
+      font-size: 18px;
+      margin-bottom: 10px;
+      max-width: 100%;
+      margin-top: 10px;
+    }
+    .controls-side-spacer {
+      width: 100vw;
+      height: 0;
+      pointer-events: none;
+    }
     .page-indicator {
       font-size: 1.1rem;
       padding: 0.2em 0.5em;
@@ -99,17 +111,6 @@
       margin-top: 3px;
       margin-bottom: 3px;
       user-select: none;
-      pointer-events: none;
-    }
-    input[type="file"] {
-      font-size: 18px;
-      margin-bottom: 10px;
-      max-width: 100%;
-      margin-top: 10px;
-    }
-    .controls-side-spacer {
-      width: 100vw;
-      height: 0;
       pointer-events: none;
     }
     @media (max-width: 900px) {
@@ -282,7 +283,6 @@
 
         drawCurrentView(pageNum);
 
-        // Draw mode events...
         canvas.addEventListener('mousedown', e => {
           if (mode !== 'draw') return;
           pageStates[pageNum].isDrawing = true;
@@ -346,9 +346,8 @@
             const dy = touches[0].clientY - pageStates[pageNum].panStartY;
             pageStates[pageNum].panStartX = touches[0].clientX;
             pageStates[pageNum].panStartY = touches[0].clientY;
-            // หารด้วย scale เพื่อให้ pan สมูทและเร็วขึ้น
-            pageStates[pageNum].offsetX += dx / pageStates[pageNum].scale;
-            pageStates[pageNum].offsetY += dy / pageStates[pageNum].scale;
+            pageStates[pageNum].offsetX += dx;
+            pageStates[pageNum].offsetY += dy;
             clampOffsets(pageNum);
             drawCurrentView(pageNum);
           } else if (touches.length === 2) {
@@ -529,6 +528,7 @@
       }, 250);
     }, { passive: true });
 
+    // For normal scroll (not inside pdfContainer, but window), also update indicator
     window.addEventListener('scroll', function () {
       let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
       let best = 1, bestDist = Infinity;
