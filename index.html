@@ -70,7 +70,7 @@
   </style>
 </head>
 <body>
-  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นจะหายพี่เซฟข้อมูลไว้ให้แล้วจะได้ไม่ต้องทำใหม่
+  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นหาย!<br>
     แค่เปิดไฟล์ PDF เดิมที่เคยทำไว้แล้วเส้นมันจะกลับมา</h2>
   <input type="file" id="pdf-upload" accept="application/pdf" />
   <div class="controls">
@@ -232,7 +232,10 @@
         ctx.moveTo(line.startX, line.startY);
         ctx.lineTo(line.endX, line.endY);
         ctx.stroke();
-        ctx.fillText(line.index, line.endX + 5, line.endY);
+        // เลขขึ้นกลางเส้น
+        const midX = (line.startX + line.endX) / 2;
+        const midY = (line.startY + line.endY) / 2;
+        ctx.fillText(line.index, midX, midY - 5);
       }
     }
 
