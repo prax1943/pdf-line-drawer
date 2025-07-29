@@ -5,222 +5,195 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ขีดเส้นบน PDF</title>
   <style>
+    /* ใส่ style ตามที่ให้ไว้ก่อนหน้า */
     body {
-      font-family: sans-serif;
       margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      font-family: sans-serif;
+      background: #f4f4f4;
+      overflow: hidden;
     }
-    canvas {
-      border: 1px solid #ccc;
-      margin-top: 10px;
-      max-width: 100%;
-      height: auto;
-    }
-    #toolbar {
+    .toolbar {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin: 10px;
-      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      background: #fff;
+      position: fixed;
+      width: 100%;
+      top: 0;
+      z-index: 10;
     }
-    button, input {
-      padding: 8px 12px;
-      font-size: 16px;
+    #pdf-container {
+      position: relative;
+      top: 60px;
+      overflow: auto;
+      height: calc(100vh - 60px);
+      -webkit-overflow-scrolling: touch;
     }
-    label {
-      margin-right: 5px;
+    canvas {
+      display: block;
+      margin: 0 auto;
+      position: absolute;
+      top: 0;
+      left: 0;
     }
   </style>
 </head>
 <body>
-  <h2>ขีดเส้นบน PDF</h2>
-  <div id="toolbar">
-    <label>อัปโหลด PDF: <input type="file" id="fileInput" accept="application/pdf" /></label>
-    <button id="prevPage">หน้าก่อนหน้า</button>
-    <button id="nextPage">หน้าถัดไป</button>
-    <button id="undo">ย้อนกลับ</button>
-    <button id="clear">ลบทั้งหมด</button>
-    <button id="savePdf">บันทึก PDF</button>
+  <div class="toolbar">
+    <input type="file" id="pdf-upload" accept="application/pdf" />
+    <button id="prev-page">⟵ ก่อนหน้า</button>
+    <span id="page-info">หน้า 1 / ?</span>
+    <button id="next-page">ถัดไป ⟶</button>
+    <button id="toggle-mode">โหมด: เลื่อน</button>
+    <button id="clear-lines">ล้างเส้น</button>
   </div>
-  <canvas id="pdfCanvas"></canvas>
 
+  <div id="pdf-container">
+    <canvas id="pdf-canvas"></canvas>
+    <canvas id="draw-canvas"></canvas>
+  </div>
+
+  <!-- โหลด PDF.js จาก CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
-    const canvas = document.getElementById("pdfCanvas");
-    const ctx = canvas.getContext("2d");
-    let pdfDoc = null, currentPage = 1, scale = 1, drawing = false;
-    let lines = {}, currentLines = [], undone = [];
-    let startX = 0, startY = 0;
-    let pageRendering = false;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
 
-    function saveToStorage() {
-      localStorage.setItem("pdfLines", JSON.stringify(lines));
+  <script>
+    // ใส่โค้ด JavaScript จาก script.js ที่ให้ไปก่อนหน้านี้ ตรงนี้เลย
+    const pdfCanvas = document.getElementById('pdf-canvas');
+    const drawCanvas = document.getElementById('draw-canvas');
+    const ctx = pdfCanvas.getContext('2d');
+    const drawCtx = drawCanvas.getContext('2d');
+    const pdfContainer = document.getElementById('pdf-container');
+
+    let pdfDoc = null;
+    let currentPage = 1;
+    let scale = 2;
+    let isDrawing = false;
+    let drawingMode = false;
+    let lines = {};
+    let currentLine = [];
+
+    function saveLines() {
+      localStorage.setItem('pdf-lines', JSON.stringify(lines));
     }
 
-    function loadFromStorage() {
-      const data = localStorage.getItem("pdfLines");
+    function loadLines() {
+      const data = localStorage.getItem('pdf-lines');
       if (data) lines = JSON.parse(data);
     }
 
+    function clearDrawCanvas() {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    }
+
+    function renderLines(pageNum) {
+      clearDrawCanvas();
+      if (!lines[pageNum]) return;
+      drawCtx.strokeStyle = 'red';
+      drawCtx.lineWidth = 2;
+      drawCtx.beginPath();
+      lines[pageNum].forEach(path => {
+        drawCtx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+          drawCtx.lineTo(path[i].x, path[i].y);
+        }
+      });
+      drawCtx.stroke();
+    }
+
     function renderPage(num) {
-      pageRendering = true;
-      pdfDoc.getPage(num).then((page) => {
-        const viewport = page.getViewport({ scale: 1 });
-        scale = resizeCanvas(viewport);
+      pdfDoc.getPage(num).then(page => {
+        const viewport = page.getViewport({ scale });
+        pdfCanvas.width = viewport.width;
+        pdfCanvas.height = viewport.height;
+        drawCanvas.width = viewport.width;
+        drawCanvas.height = viewport.height;
+
         const renderContext = {
           canvasContext: ctx,
-          viewport: page.getViewport({ scale }),
+          viewport: viewport
         };
-        return page.render(renderContext).promise;
-      }).then(() => {
-        drawLines();
-        pageRendering = false;
+        page.render(renderContext).promise.then(() => renderLines(num));
       });
+
+      document.getElementById('page-info').textContent = `หน้า ${num} / ${pdfDoc.numPages}`;
     }
 
-    function resizeCanvas(viewport) {
-      const dpr = window.devicePixelRatio || 1;
-      const maxWidth = window.innerWidth - 20;
-      let newScale = 1.5;
-      let width = viewport.width * newScale;
-      let height = viewport.height * newScale;
-
-      if (width > maxWidth) {
-        newScale = maxWidth / viewport.width;
-        width = viewport.width * newScale;
-        height = viewport.height * newScale;
-      }
-
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      return newScale;
-    }
-
-    function drawLines() {
-      ctx.lineWidth = 1 * scale;
-      ctx.strokeStyle = "red";
-      ctx.font = `${12 * scale}px sans-serif`;
-      ctx.fillStyle = "blue";
-
-      ctx.beginPath();
-      (lines[currentPage] || []).forEach((line, i) => {
-        ctx.moveTo(line.x1, line.y1);
-        ctx.lineTo(line.x2, line.y2);
-        const midX = (line.x1 + line.x2) / 2;
-        const midY = (line.y1 + line.y2) / 2;
-        ctx.fillText(`${i + 1}`, midX + 5, midY - 5);
-      });
-      ctx.stroke();
-    }
-
-    canvas.addEventListener("mousedown", (e) => {
-      drawing = true;
-      const rect = canvas.getBoundingClientRect();
-      startX = (e.clientX - rect.left) / (canvas.clientWidth / canvas.width);
-      startY = (e.clientY - rect.top) / (canvas.clientHeight / canvas.height);
-    });
-
-    canvas.addEventListener("mouseup", (e) => {
-      if (!drawing) return;
-      drawing = false;
-      const rect = canvas.getBoundingClientRect();
-      const endX = (e.clientX - rect.left) / (canvas.clientWidth / canvas.width);
-      const endY = (e.clientY - rect.top) / (canvas.clientHeight / canvas.height);
-      const line = { x1: startX, y1: startY, x2: endX, y2: endY };
-
-      lines[currentPage] = lines[currentPage] || [];
-      lines[currentPage].push(line);
-      undone = [];
-      saveToStorage();
-      renderPage(currentPage);
-    });
-
-    document.getElementById("fileInput").addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (file && file.type === "application/pdf") {
-        const reader = new FileReader();
-        reader.onload = function () {
-          const typedarray = new Uint8Array(this.result);
-          pdfjsLib.getDocument({ data: typedarray }).promise.then((pdf) => {
-            pdfDoc = pdf;
-            currentPage = 1;
-            loadFromStorage();
-            renderPage(currentPage);
-          });
-        };
-        reader.readAsArrayBuffer(file);
-      }
-    });
-
-    document.getElementById("prevPage").addEventListener("click", () => {
-      if (currentPage <= 1 || pageRendering) return;
+    document.getElementById('prev-page').onclick = () => {
+      if (currentPage <= 1) return;
       currentPage--;
       renderPage(currentPage);
-    });
+    };
 
-    document.getElementById("nextPage").addEventListener("click", () => {
-      if (currentPage >= pdfDoc.numPages || pageRendering) return;
+    document.getElementById('next-page').onclick = () => {
+      if (currentPage >= pdfDoc.numPages) return;
       currentPage++;
       renderPage(currentPage);
+    };
+
+    document.getElementById('toggle-mode').onclick = () => {
+      drawingMode = !drawingMode;
+      document.getElementById('toggle-mode').textContent = drawingMode ? 'โหมด: ขีดเส้น' : 'โหมด: เลื่อน';
+    };
+
+    document.getElementById('clear-lines').onclick = () => {
+      delete lines[currentPage];
+      saveLines();
+      renderLines(currentPage);
+    };
+
+    drawCanvas.addEventListener('pointerdown', e => {
+      if (!drawingMode) return;
+      isDrawing = true;
+      const rect = drawCanvas.getBoundingClientRect();
+      currentLine = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
     });
 
-    document.getElementById("undo").addEventListener("click", () => {
-      if (lines[currentPage]?.length) {
-        undone.push(lines[currentPage].pop());
-        saveToStorage();
-        renderPage(currentPage);
+    drawCanvas.addEventListener('pointermove', e => {
+      if (!isDrawing || !drawingMode) return;
+      const rect = drawCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      currentLine.push({ x, y });
+
+      drawCtx.lineWidth = 2;
+      drawCtx.strokeStyle = 'red';
+      drawCtx.lineCap = 'round';
+      drawCtx.beginPath();
+      const len = currentLine.length;
+      if (len > 1) {
+        drawCtx.moveTo(currentLine[len - 2].x, currentLine[len - 2].y);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
       }
     });
 
-    document.getElementById("clear").addEventListener("click", () => {
-      lines[currentPage] = [];
-      saveToStorage();
-      renderPage(currentPage);
+    drawCanvas.addEventListener('pointerup', () => {
+      if (!drawingMode) return;
+      isDrawing = false;
+      if (!lines[currentPage]) lines[currentPage] = [];
+      lines[currentPage].push(currentLine);
+      saveLines();
     });
 
-    document.getElementById("savePdf").addEventListener("click", async () => {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF();
-      for (let i = 1; i <= pdfDoc.numPages; i++) {
-        const page = await pdfDoc.getPage(i);
-        const viewport = page.getViewport({ scale: 2 });
-        const tmpCanvas = document.createElement("canvas");
-        const tmpCtx = tmpCanvas.getContext("2d");
-
-        tmpCanvas.width = viewport.width;
-        tmpCanvas.height = viewport.height;
-        await page.render({ canvasContext: tmpCtx, viewport }).promise;
-
-        tmpCtx.lineWidth = 2;
-        tmpCtx.strokeStyle = "red";
-        tmpCtx.fillStyle = "blue";
-        tmpCtx.font = "24px sans-serif";
-
-        (lines[i] || []).forEach((line, index) => {
-          tmpCtx.beginPath();
-          tmpCtx.moveTo(line.x1 * 2 / scale, line.y1 * 2 / scale);
-          tmpCtx.lineTo(line.x2 * 2 / scale, line.y2 * 2 / scale);
-          tmpCtx.stroke();
-          const midX = (line.x1 + line.x2) / 2 * 2 / scale;
-          const midY = (line.y1 + line.y2) / 2 * 2 / scale;
-          tmpCtx.fillText(`${index + 1}`, midX + 5, midY - 5);
+    document.getElementById('pdf-upload').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fileReader = new FileReader();
+      fileReader.onload = function () {
+        const typedarray = new Uint8Array(this.result);
+        pdfjsLib.getDocument(typedarray).promise.then(pdf => {
+          pdfDoc = pdf;
+          currentPage = 1;
+          loadLines();
+          renderPage(currentPage);
         });
-
-        const imgData = tmpCanvas.toDataURL("image/png");
-        if (i > 1) pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
-      }
-
-      pdf.save("pdfพร้อมเส้น.pdf");
-    });
+      };
+      fileReader.readAsArrayBuffer(file);
+    };
   </script>
 </body>
 </html>
