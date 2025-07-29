@@ -2,198 +2,379 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ขีดเส้นบน PDF</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>โปรแกรมขีดเส้นบน PDF (หลายหน้า) - รองรับมือถือและแท็บเล็ต</title>
   <style>
-    /* ใส่ style ตามที่ให้ไว้ก่อนหน้า */
     body {
-      margin: 0;
       font-family: sans-serif;
-      background: #f4f4f4;
-      overflow: hidden;
-    }
-    .toolbar {
+      margin: 10px;
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      padding: 0.5rem;
-      background: #fff;
-      position: fixed;
-      width: 100%;
-      top: 0;
-      z-index: 10;
-    }
-    #pdf-container {
-      position: relative;
-      top: 60px;
-      overflow: auto;
-      height: calc(100vh - 60px);
-      -webkit-overflow-scrolling: touch;
+      flex-direction: column;
+      align-items: center;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      overscroll-behavior: contain; /* ป้องกัน scroll ออกนอกหน้าจอเวลาสัมผัส */
     }
     canvas {
-      display: block;
-      margin: 0 auto;
-      position: absolute;
-      top: 0;
-      left: 0;
+      border: 1px solid black;
+      cursor: crosshair;
+      max-width: 100vw;
+      height: auto;
+      touch-action: none; /* ป้องกัน gesture zoom หรือ pan */
+      background: white;
+      transition: transform 0.1s ease-out;
+    }
+    .controls {
+      margin-top: 15px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 700px;
+    }
+    button {
+      font-size: 18px;
+      padding: 12px 20px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #f0f0f0;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      flex-grow: 1;
+      min-width: 120px;
+      text-align: center;
+    }
+    button:active {
+      background: #ddd;
+    }
+    input[type="file"] {
+      font-size: 18px;
+      margin-bottom: 10px;
+      max-width: 100%;
+    }
+    span.page-info {
+      font-size: 18px;
+      line-height: 36px;
+      min-width: 100px;
+      text-align: center;
+      user-select: none;
     }
   </style>
 </head>
 <body>
-  <div class="toolbar">
-    <input type="file" id="pdf-upload" accept="application/pdf" />
-    <button id="prev-page">⟵ ก่อนหน้า</button>
-    <span id="page-info">หน้า 1 / ?</span>
-    <button id="next-page">ถัดไป ⟶</button>
-    <button id="toggle-mode">โหมด: เลื่อน</button>
-    <button id="clear-lines">ล้างเส้น</button>
+  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นจะหาย พี่เซฟข้อมูลไว้ให้แล้วจะได้ไม่ต้องทำใหม่<br>
+  แค่เปิดไฟล์ PDF เดิมที่เคยทำไว้แล้วเส้นมันจะกลับมา</h2>
+  
+  <input type="file" id="pdf-upload" accept="application/pdf" />
+  
+  <div class="controls">
+    <button onclick="prevPage()">⬅️ หน้าก่อนหน้า</button>
+    <span class="page-info">หน้า: <span id="page-num">1</span> / <span id="page-count">1</span></span>
+    <button onclick="nextPage()">หน้าถัดไป ➡️</button>
+    <button id="toggle-mode-btn" onclick="toggleMode()">🖊️ โหมดขีดเส้น</button>
+    <button onclick="undo()">↩️ ย้อนกลับ</button>
+    <button onclick="savePDF()">💾 บันทึกเป็น PDF</button>
   </div>
+  
+  <canvas id="pdf-canvas"></canvas>
 
-  <div id="pdf-container">
-    <canvas id="pdf-canvas"></canvas>
-    <canvas id="draw-canvas"></canvas>
-  </div>
-
-  <!-- โหลด PDF.js จาก CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  </script>
-
-  <script>
-    // ใส่โค้ด JavaScript จาก script.js ที่ให้ไปก่อนหน้านี้ ตรงนี้เลย
-    const pdfCanvas = document.getElementById('pdf-canvas');
-    const drawCanvas = document.getElementById('draw-canvas');
-    const ctx = pdfCanvas.getContext('2d');
-    const drawCtx = drawCanvas.getContext('2d');
-    const pdfContainer = document.getElementById('pdf-container');
+    const input = document.getElementById('pdf-upload');
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    const pageNumSpan = document.getElementById('page-num');
+    const pageCountSpan = document.getElementById('page-count');
+    const toggleModeBtn = document.getElementById('toggle-mode-btn');
 
     let pdfDoc = null;
     let currentPage = 1;
-    let scale = 2;
+    let totalPages = 0;
     let isDrawing = false;
-    let drawingMode = false;
+    let startX = 0, startY = 0;
     let lines = {};
-    let currentLine = [];
+    let lineCounts = {};
+    let pdfFingerprint = null;
 
-    function saveLines() {
-      localStorage.setItem('pdf-lines', JSON.stringify(lines));
-    }
+    let mode = 'draw'; // 'draw' หรือ 'pan'
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let canvasTranslateX = 0;
+    let canvasTranslateY = 0;
 
-    function loadLines() {
-      const data = localStorage.getItem('pdf-lines');
-      if (data) lines = JSON.parse(data);
-    }
-
-    function clearDrawCanvas() {
-      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-    }
-
-    function renderLines(pageNum) {
-      clearDrawCanvas();
-      if (!lines[pageNum]) return;
-      drawCtx.strokeStyle = 'red';
-      drawCtx.lineWidth = 2;
-      drawCtx.beginPath();
-      lines[pageNum].forEach(path => {
-        drawCtx.moveTo(path[0].x, path[0].y);
-        for (let i = 1; i < path.length; i++) {
-          drawCtx.lineTo(path[i].x, path[i].y);
-        }
-      });
-      drawCtx.stroke();
-    }
-
-    function renderPage(num) {
-      pdfDoc.getPage(num).then(page => {
-        const viewport = page.getViewport({ scale });
-        pdfCanvas.width = viewport.width;
-        pdfCanvas.height = viewport.height;
-        drawCanvas.width = viewport.width;
-        drawCanvas.height = viewport.height;
-
-        const renderContext = {
-          canvasContext: ctx,
-          viewport: viewport
-        };
-        page.render(renderContext).promise.then(() => renderLines(num));
-      });
-
-      document.getElementById('page-info').textContent = `หน้า ${num} / ${pdfDoc.numPages}`;
-    }
-
-    document.getElementById('prev-page').onclick = () => {
-      if (currentPage <= 1) return;
-      currentPage--;
-      renderPage(currentPage);
-    };
-
-    document.getElementById('next-page').onclick = () => {
-      if (currentPage >= pdfDoc.numPages) return;
-      currentPage++;
-      renderPage(currentPage);
-    };
-
-    document.getElementById('toggle-mode').onclick = () => {
-      drawingMode = !drawingMode;
-      document.getElementById('toggle-mode').textContent = drawingMode ? 'โหมด: ขีดเส้น' : 'โหมด: เลื่อน';
-    };
-
-    document.getElementById('clear-lines').onclick = () => {
-      delete lines[currentPage];
-      saveLines();
-      renderLines(currentPage);
-    };
-
-    drawCanvas.addEventListener('pointerdown', e => {
-      if (!drawingMode) return;
-      isDrawing = true;
-      const rect = drawCanvas.getBoundingClientRect();
-      currentLine = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
-    });
-
-    drawCanvas.addEventListener('pointermove', e => {
-      if (!isDrawing || !drawingMode) return;
-      const rect = drawCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      currentLine.push({ x, y });
-
-      drawCtx.lineWidth = 2;
-      drawCtx.strokeStyle = 'red';
-      drawCtx.lineCap = 'round';
-      drawCtx.beginPath();
-      const len = currentLine.length;
-      if (len > 1) {
-        drawCtx.moveTo(currentLine[len - 2].x, currentLine[len - 2].y);
-        drawCtx.lineTo(x, y);
-        drawCtx.stroke();
+    // ปรับขนาด canvas ตามความกว้างหน้าจอ (ทำให้เหมาะกับมือถือ/แท็บเล็ต)
+    function resizeCanvas(viewport) {
+      const maxWidth = window.innerWidth - 20; // ลบ margin
+      let scale = 1.5;
+      let width = viewport.width * scale;
+      let height = viewport.height * scale;
+      if (width > maxWidth) {
+        scale = maxWidth / viewport.width;
+        width = viewport.width * scale;
+        height = viewport.height * scale;
       }
-    });
+      canvas.width = width;
+      canvas.height = height;
+      // รีเซ็ตตำแหน่งเลื่อนเวลาปรับขนาด
+      canvasTranslateX = 0;
+      canvasTranslateY = 0;
+      canvas.style.transform = `translate(0px, 0px)`;
+      return scale;
+    }
 
-    drawCanvas.addEventListener('pointerup', () => {
-      if (!drawingMode) return;
-      isDrawing = false;
-      if (!lines[currentPage]) lines[currentPage] = [];
-      lines[currentPage].push(currentLine);
-      saveLines();
-    });
+    function getEventPos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      if (evt.touches && evt.touches.length > 0) {
+        return {
+          x: evt.touches[0].clientX - rect.left,
+          y: evt.touches[0].clientY - rect.top
+        };
+      } else if (evt.changedTouches && evt.changedTouches.length > 0) {
+        return {
+          x: evt.changedTouches[0].clientX - rect.left,
+          y: evt.changedTouches[0].clientY - rect.top
+        };
+      } else {
+        return {
+          x: evt.offsetX,
+          y: evt.offsetY
+        };
+      }
+    }
 
-    document.getElementById('pdf-upload').onchange = e => {
+    function saveLinesToStorage() {
+      if (!pdfFingerprint) return;
+      const key = `pdfLines_${pdfFingerprint}`;
+      localStorage.setItem(key, JSON.stringify({lines, lineCounts}));
+    }
+
+    function loadLinesFromStorage() {
+      if (!pdfFingerprint) return;
+      const key = `pdfLines_${pdfFingerprint}`;
+      const data = localStorage.getItem(key);
+      if (data) {
+        try {
+          const obj = JSON.parse(data);
+          lines = obj.lines || {};
+          lineCounts = obj.lineCounts || {};
+        } catch {
+          lines = {};
+          lineCounts = {};
+        }
+      }
+    }
+
+    input.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const fileReader = new FileReader();
-      fileReader.onload = function () {
-        const typedarray = new Uint8Array(this.result);
-        pdfjsLib.getDocument(typedarray).promise.then(pdf => {
-          pdfDoc = pdf;
-          currentPage = 1;
-          loadLines();
-          renderPage(currentPage);
-        });
+      fileReader.onload = async function () {
+        const typedArray = new Uint8Array(this.result);
+        pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
+        totalPages = pdfDoc.numPages;
+        pageCountSpan.textContent = totalPages;
+        pdfFingerprint = pdfDoc.fingerprints ? pdfDoc.fingerprints[0] : null;
+
+        loadLinesFromStorage();
+
+        for (let i = 1; i <= totalPages; i++) {
+          if (!lines[i]) lines[i] = [];
+          if (!lineCounts[i]) lineCounts[i] = lines[i].length;
+        }
+        currentPage = 1;
+        renderPage(currentPage);
       };
       fileReader.readAsArrayBuffer(file);
-    };
+    });
+
+    async function renderPage(num) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = resizeCanvas(viewport);
+      const scaledViewport = page.getViewport({ scale });
+
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+      drawLines(num);
+      pageNumSpan.textContent = num;
+    }
+
+    function drawLines(pageNum) {
+      renderPageWithoutLines(pageNum).then(() => {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.font = '18px sans-serif';
+        ctx.fillStyle = 'blue';
+        for (let line of lines[pageNum]) {
+          ctx.beginPath();
+          ctx.moveTo(line.startX, line.startY);
+          ctx.lineTo(line.endX, line.endY);
+          ctx.stroke();
+          ctx.fillText(line.index, line.endX + 5, line.endY);
+        }
+      });
+    }
+
+    async function renderPageWithoutLines(num) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = resizeCanvas(viewport);
+      const scaledViewport = page.getViewport({ scale });
+
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+    }
+
+    // ฟังก์ชันสลับโหมด draw / pan
+    function toggleMode() {
+      if (mode === 'draw') {
+        mode = 'pan';
+        toggleModeBtn.textContent = '🖐️ โหมดเลื่อน';
+        canvas.style.cursor = 'grab';
+      } else {
+        mode = 'draw';
+        toggleModeBtn.textContent = '🖊️ โหมดขีดเส้น';
+        canvas.style.cursor = 'crosshair';
+      }
+    }
+
+    // โหมดขีดเส้น (mouse)
+    canvas.addEventListener('mousedown', e => {
+      if (mode === 'draw') {
+        isDrawing = true;
+        const pos = getEventPos(e);
+        startX = pos.x;
+        startY = pos.y;
+      } else if (mode === 'pan') {
+        isPanning = true;
+        panStartX = e.clientX - canvasTranslateX;
+        panStartY = e.clientY - canvasTranslateY;
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+
+    canvas.addEventListener('mouseup', e => {
+      if (mode === 'draw') {
+        if (!isDrawing) return;
+        isDrawing = false;
+        const pos = getEventPos(e);
+        const endX = pos.x;
+        const endY = pos.y;
+        lineCounts[currentPage]++;
+        lines[currentPage].push({
+          startX, startY, endX, endY, index: lineCounts[currentPage]
+        });
+        saveLinesToStorage();
+        drawLines(currentPage);
+      } else if (mode === 'pan') {
+        isPanning = false;
+        canvas.style.cursor = 'grab';
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (mode === 'pan' && isPanning) {
+        canvasTranslateX = e.clientX - panStartX;
+        canvasTranslateY = e.clientY - panStartY;
+        canvas.style.transform = `translate(${canvasTranslateX}px, ${canvasTranslateY}px)`;
+      }
+    });
+
+    canvas.addEventListener('mouseleave', e => {
+      if (mode === 'pan') {
+        isPanning = false;
+        canvas.style.cursor = 'grab';
+      }
+    });
+
+    // โหมดขีดเส้น (touch)
+    canvas.addEventListener('touchstart', e => {
+      if (mode === 'draw') {
+        e.preventDefault();
+        isDrawing = true;
+        const pos = getEventPos(e);
+        startX = pos.x;
+        startY = pos.y;
+      } else if (mode === 'pan') {
+        e.preventDefault();
+        isPanning = true;
+        panStartX = e.touches[0].clientX - canvasTranslateX;
+        panStartY = e.touches[0].clientY - canvasTranslateY;
+        canvas.style.cursor = 'grabbing';
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+      if (mode === 'pan' && isPanning) {
+        e.preventDefault();
+        canvasTranslateX = e.touches[0].clientX - panStartX;
+        canvasTranslateY = e.touches[0].clientY - panStartY;
+        canvas.style.transform = `translate(${canvasTranslateX}px, ${canvasTranslateY}px)`;
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e => {
+      if (mode === 'draw') {
+        e.preventDefault();
+        if (!isDrawing) return;
+        isDrawing = false;
+        const pos = getEventPos(e);
+        const endX = pos.x;
+        const endY = pos.y;
+        lineCounts[currentPage]++;
+        lines[currentPage].push({
+          startX, startY, endX, endY, index: lineCounts[currentPage]
+        });
+        saveLinesToStorage();
+        drawLines(currentPage);
+      } else if (mode === 'pan') {
+        e.preventDefault();
+        isPanning = false;
+        canvas.style.cursor = 'grab';
+      }
+    }, { passive: false });
+
+    function prevPage() {
+      if (currentPage <= 1) return;
+      currentPage--;
+      renderPage(currentPage);
+    }
+
+    function nextPage() {
+      if (currentPage >= totalPages) return;
+      currentPage++;
+      renderPage(currentPage);
+    }
+
+    function undo() {
+      if (lines[currentPage] && lines[currentPage].length > 0) {
+        lines[currentPage].pop();
+        lineCounts[currentPage] = lines[currentPage].length;
+        saveLinesToStorage();
+        drawLines(currentPage);
+      }
+    }
+
+    async function savePDF() {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        unit: 'pt',
+        format: [canvas.width, canvas.height]
+      });
+      for (let i = 1; i <= totalPages; i++) {
+        await renderPageWithoutLines(i);
+        drawLines(i);
+        // รอให้ canvas วาดเสร็จก่อน capture รูป
+        await new Promise(r => setTimeout(r, 200));
+        const imgData = canvas.toDataURL('image/png');
+        if (i > 1) pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      }
+      pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
+    }
   </script>
 </body>
 </html>
