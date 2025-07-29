@@ -37,43 +37,56 @@
       touch-action: none;
       user-select: none;
     }
-    .controls-fixed {
+    /* Side controls */
+    .controls-side {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
+      top: 50%;
+      right: 2vw;
+      transform: translateY(-50%);
       z-index: 999;
-      background: rgba(255,255,255,0.98);
       display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      padding: 8px 0 8px 0;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-      border-bottom: 1px solid #eee;
-      max-width: 100vw;
+      flex-direction: column;
+      gap: 22px;
+      background: rgba(255,255,255,0.93);
+      border-radius: 18px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.10);
+      padding: 22px 16px;
+      align-items: center;
+      min-width: 64px;
+      max-width: 100px;
     }
-    .controls-fixed button {
-      font-size: 18px;
-      padding: 12px 20px;
-      border-radius: 6px;
-      border: 1px solid #333;
-      background: #f0f0f0;
+    .controls-side button {
+      font-size: 2.1rem;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 2px solid #bbb;
+      background: white;
       cursor: pointer;
       user-select: none;
-      -webkit-user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      flex-grow: 1;
-      min-width: 120px;
-      transition: background-color 0.3s;
+      outline: none;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .controls-fixed button.active {
-      background-color: #4caf50;
-      color: white;
+    .controls-side button.active {
+      background: #4caf50;
+      color: #fff;
       border-color: #3e8e41;
     }
-    .controls-fixed button:active:not(.active) {
-      background: #ddd;
+    .controls-side button:active:not(.active) {
+      background: #eee;
+    }
+    .controls-side button:focus {
+      border-color: #2196f3;
+    }
+    /* Hide text selection highlight on tap */
+    .controls-side button, .controls-side {
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
     }
     input[type="file"] {
       font-size: 18px;
@@ -81,20 +94,24 @@
       max-width: 100%;
       margin-top: 10px;
     }
-    /* สำหรับให้ scroll ไม่โดนปิดหัว */
-    .controls-spacer {
-      height: 76px;
-      width: 100%;
-      max-width: 900px;
+    /* Add space so side panel doesn't overlap pdf */
+    .controls-side-spacer {
+      width: 100vw;
+      height: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 900px) {
+      .controls-side { right: 0.5vw; }
     }
     @media (max-width: 600px) {
-      .controls-fixed {
-        flex-direction: column;
-        gap: 6px;
-        padding: 6px 0 6px 0;
+      .controls-side {
+        right: 0;
+        min-width: 48px;
+        padding: 12px 4px;
+        gap: 10px;
       }
-      .controls-spacer {
-        height: 108px;
+      .controls-side button {
+        width: 44px; height: 44px; font-size: 1.6rem;
       }
     }
   </style>
@@ -102,13 +119,13 @@
 <body>
   <h2>ขีดเส้น PDF ทุกหน้า (แนวตั้ง) - ลากเส้นแต่ละหน้าได้ เลข index ต่อเนื่อง</h2>
   <input type="file" id="pdf-upload" accept="application/pdf" />
-  <div class="controls-fixed">
-    <button id="btn-draw" class="active">🖊️ โหมดเส้น</button>
-    <button id="btn-pan">✋ โหมดเลื่อน/ซูม</button>
-    <button id="btn-undo">↩️ ลบเส้นล่าสุด (หน้าทั้งหมด)</button>
-    <button id="btn-save">💾 บันทึกเป็น PDF</button>
+  <div class="controls-side">
+    <button id="btn-draw" class="active" title="โหมดเส้น">🖊️</button>
+    <button id="btn-pan" title="โหมดเลื่อน/ซูม">✋</button>
+    <button id="btn-undo" title="ลบเส้นล่าสุด">↩️</button>
+    <button id="btn-save" title="บันทึกเป็น PDF">💾</button>
   </div>
-  <div class="controls-spacer"></div>
+  <div class="controls-side-spacer"></div>
   <div id="pdf-container" class="pdf-container"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
