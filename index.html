@@ -14,6 +14,7 @@
       -webkit-user-select: none;
       -webkit-touch-callout: none;
       overscroll-behavior: contain;
+      box-sizing: border-box;
     }
     .pdf-container {
       width: 100%;
@@ -21,6 +22,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
+      margin-top: 15px;
     }
     .pdf-page-wrap {
       margin-bottom: 20px;
@@ -35,16 +37,23 @@
       touch-action: none;
       user-select: none;
     }
-    .controls {
-      margin-top: 15px;
+    .controls-fixed {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      z-index: 999;
+      background: rgba(255,255,255,0.98);
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
       gap: 10px;
-      width: 100%;
-      max-width: 720px;
+      padding: 8px 0 8px 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border-bottom: 1px solid #eee;
+      max-width: 100vw;
     }
-    button {
+    .controls-fixed button {
       font-size: 18px;
       padding: 12px 20px;
       border-radius: 6px;
@@ -58,39 +67,59 @@
       min-width: 120px;
       transition: background-color 0.3s;
     }
-    button.active {
+    .controls-fixed button.active {
       background-color: #4caf50;
       color: white;
       border-color: #3e8e41;
     }
-    button:active:not(.active) {
+    .controls-fixed button:active:not(.active) {
       background: #ddd;
     }
     input[type="file"] {
       font-size: 18px;
       margin-bottom: 10px;
       max-width: 100%;
+      margin-top: 10px;
+    }
+    /* สำหรับให้ scroll ไม่โดนปิดหัว */
+    .controls-spacer {
+      height: 76px;
+      width: 100%;
+      max-width: 900px;
+    }
+    @media (max-width: 600px) {
+      .controls-fixed {
+        flex-direction: column;
+        gap: 6px;
+        padding: 6px 0 6px 0;
+      }
+      .controls-spacer {
+        height: 108px;
+      }
     }
   </style>
 </head>
 <body>
   <h2>ขีดเส้น PDF ทุกหน้า (แนวตั้ง) - ลากเส้นแต่ละหน้าได้ เลข index ต่อเนื่อง</h2>
   <input type="file" id="pdf-upload" accept="application/pdf" />
-  <div class="controls">
+  <div class="controls-fixed">
     <button id="btn-draw" class="active">🖊️ โหมดเส้น</button>
     <button id="btn-pan">✋ โหมดเลื่อน/ซูม</button>
     <button id="btn-undo">↩️ ลบเส้นล่าสุด (หน้าทั้งหมด)</button>
-    <!-- เพิ่มปุ่ม save pdf ได้ตามต้องการ -->
+    <button id="btn-save">💾 บันทึกเป็น PDF</button>
   </div>
+  <div class="controls-spacer"></div>
   <div id="pdf-container" class="pdf-container"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     const input = document.getElementById('pdf-upload');
     const pdfContainer = document.getElementById('pdf-container');
     const btnDraw = document.getElementById('btn-draw');
     const btnPan = document.getElementById('btn-pan');
     const btnUndo = document.getElementById('btn-undo');
+    const btnSave = document.getElementById('btn-save');
 
     let pdfDoc = null;
     let totalPages = 0;
@@ -367,6 +396,23 @@
           break;
         }
       }
+    };
+
+    btnSave.onclick = async function () {
+      if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
+      const { jsPDF } = window.jspdf;
+      const firstCanvas = canvases[1];
+      const pdf = new jsPDF({
+        unit: 'pt',
+        format: [firstCanvas.width, firstCanvas.height]
+      });
+      for (let i = 1; i <= totalPages; i++) {
+        if (i > 1) pdf.addPage();
+        drawCurrentView(i);
+        const imgData = canvases[i].toDataURL('image/png');
+        pdf.addImage(imgData, 'PNG', 0, 0, firstCanvas.width, firstCanvas.height);
+      }
+      pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
     };
 
   </script>
