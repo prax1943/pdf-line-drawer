@@ -276,7 +276,9 @@
 
         canvases[pageNum] = canvas;
         pageStates[pageNum] = {
-          offsetX: 0, offsetY: 0, scale: Math.min(1, window.innerWidth/pdfPageImage.width), isDrawing: false,
+          offsetX: 0, offsetY: 0,
+          scale: 1, // <--- ขนาดปกติ ไม่ย่ออัตโนมัติ
+          isDrawing: false,
           isPanning: false, panStartX: 0, panStartY: 0, lastDist: null,
           startX: 0, startY: 0, img: pdfPageImage
         };
