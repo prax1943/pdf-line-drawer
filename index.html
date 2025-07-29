@@ -98,6 +98,21 @@
       height: 0;
       pointer-events: none;
     }
+    .page-indicator {
+      font-size: 1.1rem;
+      padding: 0.2em 0.5em;
+      margin-bottom: 4px;
+      border-radius: 7px;
+      color: #222;
+      background: #e7eaf9;
+      min-width: 56px;
+      text-align: center;
+      font-weight: bold;
+      margin-top: 3px;
+      margin-bottom: 3px;
+      user-select: none;
+      pointer-events: none;
+    }
     @media (max-width: 900px) {
       .controls-side { right: 0.5vw; }
     }
@@ -111,6 +126,10 @@
       .controls-side button {
         width: 44px; height: 44px; font-size: 1.6rem;
       }
+      .page-indicator {
+        font-size: 1rem;
+        min-width: 42px;
+      }
     }
   </style>
 </head>
@@ -118,6 +137,9 @@
   <h2>ขีดเส้น PDF ทุกหน้า (แนวตั้ง) - ลากเส้นแต่ละหน้าได้ เลข index ต่อเนื่อง</h2>
   <input type="file" id="pdf-upload" accept="application/pdf" />
   <div class="controls-side">
+    <button id="btn-up" title="เลื่อนไปหน้าก่อนหน้า">⬆️</button>
+    <div class="page-indicator" id="page-indicator">1 / 1</div>
+    <button id="btn-down" title="เลื่อนไปหน้าถัดไป">⬇️</button>
     <button id="btn-draw" class="active" title="โหมดเส้น">🖊️</button>
     <button id="btn-pan" title="โหมดเลื่อน/ซูม">✋</button>
     <button id="btn-undo" title="ลบเส้นล่าสุด">↩️</button>
@@ -135,6 +157,9 @@
     const btnPan = document.getElementById('btn-pan');
     const btnUndo = document.getElementById('btn-undo');
     const btnSave = document.getElementById('btn-save');
+    const btnUp = document.getElementById('btn-up');
+    const btnDown = document.getElementById('btn-down');
+    const pageIndicator = document.getElementById('page-indicator');
 
     let pdfDoc = null;
     let totalPages = 0;
@@ -143,7 +168,8 @@
 
     let lines = {};
     let canvases = [];
-    let pageStates = []; // [{offsetX, offsetY, scale, isDrawing, startX, startY, isPanning, panStartX, panStartY, lastDist}]
+    let pageStates = [];
+    let currentPageForScroll = 1;
 
     function getNextLineIndex(page) {
       let index = 0;
@@ -169,6 +195,38 @@
       }
     }
 
+    function updatePageIndicator() {
+      if (!totalPages) {
+        pageIndicator.textContent = "- / -";
+      } else {
+        pageIndicator.textContent = currentPageForScroll + " / " + totalPages;
+      }
+    }
+
+    function scrollToPage(num) {
+      const wrap = document.querySelector(`.pdf-page-wrap:nth-child(${num})`);
+      if (wrap) {
+        wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+        currentPageForScroll = num;
+        updatePageIndicator();
+      }
+    }
+
+    btnUp.onclick = () => {
+      if (!totalPages) return;
+      if (currentPageForScroll > 1) {
+        currentPageForScroll--;
+        scrollToPage(currentPageForScroll);
+      }
+    };
+    btnDown.onclick = () => {
+      if (!totalPages) return;
+      if (currentPageForScroll < totalPages) {
+        currentPageForScroll++;
+        scrollToPage(currentPageForScroll);
+      }
+    };
+
     input.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -183,12 +241,14 @@
         pdfContainer.innerHTML = "";
         canvases = [];
         pageStates = [];
+        currentPageForScroll = 1;
+        updatePageIndicator();
 
-        // render ทุกหน้า
         for (let i = 1; i <= totalPages; i++) {
           lines[i] = lines[i] || [];
           await renderPage(i);
         }
+        scrollToPage(1);
       };
       fileReader.readAsArrayBuffer(file);
     });
@@ -202,12 +262,10 @@
       const tempCtx = tempCanvas.getContext('2d');
       await page.render({ canvasContext: tempCtx, viewport }).promise;
 
-      // สร้าง image จาก canvas นี้เก็บไว้ใช้วาดซ้ำ
       const pdfPageImage = new Image();
       pdfPageImage.src = tempCanvas.toDataURL();
 
       pdfPageImage.onload = () => {
-        // สร้าง canvas จริง
         const wrap = document.createElement('div');
         wrap.className = 'pdf-page-wrap';
         const canvas = document.createElement('canvas');
@@ -225,7 +283,6 @@
 
         drawCurrentView(pageNum);
 
-        // Event - Draw Mode
         canvas.addEventListener('mousedown', e => {
           if (mode !== 'draw') return;
           pageStates[pageNum].isDrawing = true;
@@ -299,7 +356,6 @@
               let zoom = dist / pageStates[pageNum].lastDist;
               let newScale = pageStates[pageNum].scale * zoom;
               newScale = Math.min(Math.max(newScale, 0.5), 5);
-              // ซูมศูนย์กลางหน้าจอ
               const rect = canvas.getBoundingClientRect();
               const centerX = (touches[0].clientX + touches[1].clientX) / 2 - rect.left;
               const centerY = (touches[0].clientY + touches[1].clientY) / 2 - rect.top;
@@ -320,7 +376,6 @@
       };
     }
 
-    // แก้ไขตำแหน่งให้ตรงแม่นยำ
     function getEventPos(evt, pageNum) {
       const canvas = canvases[pageNum];
       const rect = canvas.getBoundingClientRect();
@@ -392,7 +447,6 @@
       }
     }
 
-    // ---- UI Controls ----
     btnDraw.onclick = () => {
       mode = 'draw';
       btnDraw.classList.add('active');
@@ -416,35 +470,26 @@
       }
     };
 
-    // เซฟ PDF ขนาดต้นฉบับ (ไม่ตาม zoom/pan)
     btnSave.onclick = async function () {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
       const { jsPDF } = window.jspdf;
-
-      // ใช้ scale 2 (หรือ scale เดิมที่ใช้ตอน renderPage)
       const page = await pdfDoc.getPage(1);
       const viewport = page.getViewport({ scale: 2 });
       const pageWidth = viewport.width;
       const pageHeight = viewport.height;
-
       const pdf = new jsPDF({
         unit: 'pt',
         format: [pageWidth, pageHeight]
       });
 
       for (let i = 1; i <= totalPages; i++) {
-        // สร้าง temp canvas ขนาดเต็ม
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = pageWidth;
         tempCanvas.height = pageHeight;
         const tempCtx = tempCanvas.getContext('2d');
-
-        // render PDF หน้า i ลงบน temp canvas
         const pg = await pdfDoc.getPage(i);
         const vp = pg.getViewport({ scale: 2 });
         await pg.render({ canvasContext: tempCtx, viewport: vp }).promise;
-
-        // วาดเส้นทับ
         tempCtx.strokeStyle = 'red';
         tempCtx.lineWidth = 2;
         tempCtx.font = `18px sans-serif`;
@@ -456,15 +501,48 @@
           tempCtx.stroke();
           tempCtx.fillText(line.index, line.endX + 5, line.endY);
         }
-
-        // ใส่เข้า PDF
         const imgData = tempCanvas.toDataURL('image/png');
         if (i > 1) pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight);
       }
-
       pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
     };
+
+    // Scroll to correct page when user scrolls manually
+    let scrollTimeout = null;
+    pdfContainer.addEventListener('scroll', function () {
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
+        let best = 1, bestDist = Infinity;
+        for (let i = 0; i < pageWraps.length; ++i) {
+          const rect = pageWraps[i].getBoundingClientRect();
+          const dist = Math.abs(rect.top + rect.bottom - window.innerHeight);
+          if (dist < bestDist) {
+            best = i + 1;
+            bestDist = dist;
+          }
+        }
+        currentPageForScroll = best;
+        updatePageIndicator();
+      }, 250);
+    }, { passive: true });
+
+    // For normal scroll (not inside pdfContainer, but window), also update indicator
+    window.addEventListener('scroll', function () {
+      let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
+      let best = 1, bestDist = Infinity;
+      for (let i = 0; i < pageWraps.length; ++i) {
+        const rect = pageWraps[i].getBoundingClientRect();
+        const dist = Math.abs(rect.top + rect.bottom - window.innerHeight);
+        if (dist < bestDist) {
+          best = i + 1;
+          bestDist = dist;
+        }
+      }
+      currentPageForScroll = best;
+      updatePageIndicator();
+    }, { passive: true });
 
   </script>
 </body>
