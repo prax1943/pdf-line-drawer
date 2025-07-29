@@ -13,16 +13,16 @@
       align-items: center;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
-      overscroll-behavior: contain; /* ป้องกัน scroll ออกนอกหน้าจอเวลาสัมผัส */
+      overscroll-behavior: contain;
     }
     canvas {
       border: 1px solid black;
       cursor: crosshair;
       max-width: 100vw;
       height: auto;
-      touch-action: none; /* ป้องกัน gesture zoom หรือ pan */
       background: white;
-      transition: transform 0.1s ease-out;
+      touch-action: none; /* ป้องกัน gesture zoom/pan เริ่มต้น */
+      user-select: none;
     }
     .controls {
       margin-top: 15px;
@@ -31,7 +31,7 @@
       justify-content: center;
       gap: 10px;
       width: 100%;
-      max-width: 700px;
+      max-width: 720px;
     }
     button {
       font-size: 18px;
@@ -45,9 +45,14 @@
       -webkit-tap-highlight-color: transparent;
       flex-grow: 1;
       min-width: 120px;
-      text-align: center;
+      transition: background-color 0.3s;
     }
-    button:active {
+    button.active {
+      background-color: #4caf50;
+      color: white;
+      border-color: #3e8e41;
+    }
+    button:active:not(.active) {
       background: #ddd;
     }
     input[type="file"] {
@@ -65,20 +70,20 @@
   </style>
 </head>
 <body>
-  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นจะหาย พี่เซฟข้อมูลไว้ให้แล้วจะได้ไม่ต้องทำใหม่<br>
-  แค่เปิดไฟล์ PDF เดิมที่เคยทำไว้แล้วเส้นมันจะกลับมา</h2>
-  
+  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นจะหายพี่เซฟข้อมูลไว้ให้แล้วจะได้ไม่ต้องทำใหม่
+    แค่เปิดไฟล์ PDF เดิมที่เคยทำไว้แล้วเส้นมันจะกลับมา</h2>
   <input type="file" id="pdf-upload" accept="application/pdf" />
-  
   <div class="controls">
-    <button onclick="prevPage()">⬅️ หน้าก่อนหน้า</button>
+    <button id="btn-prev" onclick="prevPage()">⬅️ หน้าก่อนหน้า</button>
     <span class="page-info">หน้า: <span id="page-num">1</span> / <span id="page-count">1</span></span>
-    <button onclick="nextPage()">หน้าถัดไป ➡️</button>
-    <button id="toggle-mode-btn" onclick="toggleMode()">🖊️ โหมดขีดเส้น</button>
-    <button onclick="undo()">↩️ ย้อนกลับ</button>
-    <button onclick="savePDF()">💾 บันทึกเป็น PDF</button>
+    <button id="btn-next" onclick="nextPage()">หน้าถัดไป ➡️</button>
+    <button id="btn-undo" onclick="undo()">↩️ ย้อนกลับ</button>
+    <button id="btn-save" onclick="savePDF()">💾 บันทึกเป็น PDF</button>
   </div>
-  
+  <div class="controls" style="margin-top: 5px;">
+    <button id="btn-draw" class="active">🖊️ โหมดเส้น</button>
+    <button id="btn-pan">✋ โหมดเลื่อน/ซูม</button>
+  </div>
   <canvas id="pdf-canvas"></canvas>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
@@ -89,7 +94,9 @@
     const ctx = canvas.getContext('2d');
     const pageNumSpan = document.getElementById('page-num');
     const pageCountSpan = document.getElementById('page-count');
-    const toggleModeBtn = document.getElementById('toggle-mode-btn');
+
+    const btnDraw = document.getElementById('btn-draw');
+    const btnPan = document.getElementById('btn-pan');
 
     let pdfDoc = null;
     let currentPage = 1;
@@ -100,49 +107,45 @@
     let lineCounts = {};
     let pdfFingerprint = null;
 
+    // สำหรับ pan & zoom
     let mode = 'draw'; // 'draw' หรือ 'pan'
-    let isPanning = false;
-    let panStartX = 0;
-    let panStartY = 0;
-    let canvasTranslateX = 0;
-    let canvasTranslateY = 0;
+    let offsetX = 0, offsetY = 0;
+    let lastPanX = 0, lastPanY = 0;
+    let scale = 1;
+    let lastDist = null;
 
-    // ปรับขนาด canvas ตามความกว้างหน้าจอ (ทำให้เหมาะกับมือถือ/แท็บเล็ต)
+    // resize canvas ตาม viewport ขนาด pdf
     function resizeCanvas(viewport) {
-      const maxWidth = window.innerWidth - 20; // ลบ margin
-      let scale = 1.5;
-      let width = viewport.width * scale;
-      let height = viewport.height * scale;
+      const maxWidth = window.innerWidth - 20;
+      let usedScale = 1.5;
+      let width = viewport.width * usedScale;
+      let height = viewport.height * usedScale;
       if (width > maxWidth) {
-        scale = maxWidth / viewport.width;
-        width = viewport.width * scale;
-        height = viewport.height * scale;
+        usedScale = maxWidth / viewport.width;
+        width = viewport.width * usedScale;
+        height = viewport.height * usedScale;
       }
       canvas.width = width;
       canvas.height = height;
-      // รีเซ็ตตำแหน่งเลื่อนเวลาปรับขนาด
-      canvasTranslateX = 0;
-      canvasTranslateY = 0;
-      canvas.style.transform = `translate(0px, 0px)`;
-      return scale;
+      return usedScale;
     }
 
     function getEventPos(evt) {
       const rect = canvas.getBoundingClientRect();
       if (evt.touches && evt.touches.length > 0) {
         return {
-          x: evt.touches[0].clientX - rect.left,
-          y: evt.touches[0].clientY - rect.top
+          x: (evt.touches[0].clientX - rect.left - offsetX) / scale,
+          y: (evt.touches[0].clientY - rect.top - offsetY) / scale
         };
       } else if (evt.changedTouches && evt.changedTouches.length > 0) {
         return {
-          x: evt.changedTouches[0].clientX - rect.left,
-          y: evt.changedTouches[0].clientY - rect.top
+          x: (evt.changedTouches[0].clientX - rect.left - offsetX) / scale,
+          y: (evt.changedTouches[0].clientY - rect.top - offsetY) / scale
         };
       } else {
         return {
-          x: evt.offsetX,
-          y: evt.offsetY
+          x: (evt.offsetX - offsetX) / scale,
+          y: (evt.offsetY - offsetY) / scale
         };
       }
     }
@@ -187,6 +190,9 @@
           if (!lineCounts[i]) lineCounts[i] = lines[i].length;
         }
         currentPage = 1;
+        offsetX = 0;
+        offsetY = 0;
+        scale = 1;
         renderPage(currentPage);
       };
       fileReader.readAsArrayBuffer(file);
@@ -195,19 +201,40 @@
     async function renderPage(num) {
       const page = await pdfDoc.getPage(num);
       const viewport = page.getViewport({ scale: 1 });
-      const scale = resizeCanvas(viewport);
-      const scaledViewport = page.getViewport({ scale });
+      const usedScale = resizeCanvas(viewport);
+      scale = usedScale; // ตั้ง scale เริ่มต้น
+      offsetX = 0;
+      offsetY = 0;
 
+      const scaledViewport = page.getViewport({ scale: usedScale });
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
       drawLines(num);
       pageNumSpan.textContent = num;
+      applyTransform();
+    }
+
+    // ใช้สำหรับเรนเดอร์หน้าโดยไม่วาดเส้น (ใช้ตอน save หรือ redraw)
+    async function renderPageWithoutLines(num) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: 1 });
+      const usedScale = resizeCanvas(viewport);
+      scale = usedScale;
+      offsetX = 0;
+      offsetY = 0;
+
+      const scaledViewport = page.getViewport({ scale: usedScale });
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+      applyTransform();
     }
 
     function drawLines(pageNum) {
+      // เรนเดอร์ใหม่ก่อนวาดเส้นเพื่อให้เส้นไม่ทับเส้นเดิม
       renderPageWithoutLines(pageNum).then(() => {
+        ctx.save();
+        ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
         ctx.strokeStyle = 'red';
-        ctx.lineWidth = 2;
-        ctx.font = '18px sans-serif';
+        ctx.lineWidth = 2 / scale; // ปรับขนาดเส้นตาม scale เพื่อให้หนาเท่าเดิม
+        ctx.font = `${18 / scale}px sans-serif`;
         ctx.fillStyle = 'blue';
         for (let line of lines[pageNum]) {
           ctx.beginPath();
@@ -216,136 +243,169 @@
           ctx.stroke();
           ctx.fillText(line.index, line.endX + 5, line.endY);
         }
+        ctx.restore();
       });
     }
 
-    async function renderPageWithoutLines(num) {
-      const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 1 });
-      const scale = resizeCanvas(viewport);
-      const scaledViewport = page.getViewport({ scale });
-
-      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+    function applyTransform() {
+      // ใช้ setTransform เพื่อจัดการ pan + zoom (ไม่ใช้ CSS transform เพราะต้องการให้ canvas คำนวณตำแหน่งวาดถูกต้อง)
+      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
     }
 
-    // ฟังก์ชันสลับโหมด draw / pan
-    function toggleMode() {
-      if (mode === 'draw') {
-        mode = 'pan';
-        toggleModeBtn.textContent = '🖐️ โหมดเลื่อน';
-        canvas.style.cursor = 'grab';
-      } else {
-        mode = 'draw';
-        toggleModeBtn.textContent = '🖊️ โหมดขีดเส้น';
-        canvas.style.cursor = 'crosshair';
-      }
+    // ฟังก์ชันช่วยคำนวณระยะห่างสองจุด (สำหรับ pinch zoom)
+    function getDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx*dx + dy*dy);
     }
 
-    // โหมดขีดเส้น (mouse)
+    // เหตุการณ์สำหรับโหมดขีดเส้น
+    function enableDrawMode() {
+      mode = 'draw';
+      canvas.style.cursor = 'crosshair';
+      btnDraw.classList.add('active');
+      btnPan.classList.remove('active');
+    }
+
+    // เหตุการณ์สำหรับโหมดเลื่อน/ซูม
+    function enablePanMode() {
+      mode = 'pan';
+      canvas.style.cursor = 'grab';
+      btnDraw.classList.remove('active');
+      btnPan.classList.add('active');
+    }
+
+    // ตั้ง event listeners สำหรับการขีดเส้น (mousedown, mouseup, touchstart, touchend)
     canvas.addEventListener('mousedown', e => {
-      if (mode === 'draw') {
-        isDrawing = true;
-        const pos = getEventPos(e);
-        startX = pos.x;
-        startY = pos.y;
-      } else if (mode === 'pan') {
-        isPanning = true;
-        panStartX = e.clientX - canvasTranslateX;
-        panStartY = e.clientY - canvasTranslateY;
-        canvas.style.cursor = 'grabbing';
-      }
+      if (mode !== 'draw') return;
+      isDrawing = true;
+      const pos = getEventPos(e);
+      startX = pos.x;
+      startY = pos.y;
     });
-
     canvas.addEventListener('mouseup', e => {
-      if (mode === 'draw') {
-        if (!isDrawing) return;
-        isDrawing = false;
-        const pos = getEventPos(e);
-        const endX = pos.x;
-        const endY = pos.y;
-        lineCounts[currentPage]++;
-        lines[currentPage].push({
-          startX, startY, endX, endY, index: lineCounts[currentPage]
-        });
-        saveLinesToStorage();
-        drawLines(currentPage);
-      } else if (mode === 'pan') {
-        isPanning = false;
-        canvas.style.cursor = 'grab';
-      }
+      if (mode !== 'draw') return;
+      if (!isDrawing) return;
+      isDrawing = false;
+      const pos = getEventPos(e);
+      const endX = pos.x;
+      const endY = pos.y;
+      lineCounts[currentPage]++;
+      lines[currentPage].push({startX, startY, endX, endY, index: lineCounts[currentPage]});
+      saveLinesToStorage();
+      drawLines(currentPage);
     });
-
-    canvas.addEventListener('mousemove', e => {
-      if (mode === 'pan' && isPanning) {
-        canvasTranslateX = e.clientX - panStartX;
-        canvasTranslateY = e.clientY - panStartY;
-        canvas.style.transform = `translate(${canvasTranslateX}px, ${canvasTranslateY}px)`;
-      }
-    });
-
     canvas.addEventListener('mouseleave', e => {
-      if (mode === 'pan') {
-        isPanning = false;
-        canvas.style.cursor = 'grab';
-      }
+      if (mode !== 'draw') return;
+      isDrawing = false;
     });
 
-    // โหมดขีดเส้น (touch)
     canvas.addEventListener('touchstart', e => {
-      if (mode === 'draw') {
-        e.preventDefault();
-        isDrawing = true;
-        const pos = getEventPos(e);
-        startX = pos.x;
-        startY = pos.y;
-      } else if (mode === 'pan') {
-        e.preventDefault();
-        isPanning = true;
-        panStartX = e.touches[0].clientX - canvasTranslateX;
-        panStartY = e.touches[0].clientY - canvasTranslateY;
-        canvas.style.cursor = 'grabbing';
+      e.preventDefault();
+      if (mode !== 'draw') return;
+      isDrawing = true;
+      const pos = getEventPos(e);
+      startX = pos.x;
+      startY = pos.y;
+    }, { passive: false });
+    canvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      if (mode !== 'draw') return;
+      if (!isDrawing) return;
+      isDrawing = false;
+      const pos = getEventPos(e);
+      const endX = pos.x;
+      const endY = pos.y;
+      lineCounts[currentPage]++;
+      lines[currentPage].push({startX, startY, endX, endY, index: lineCounts[currentPage]});
+      saveLinesToStorage();
+      drawLines(currentPage);
+    }, { passive: false });
+
+    // ตัวแปรช่วยเก็บตำแหน่ง pan เริ่มต้น และสถานะ
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0;
+
+    // Pan + pinch zoom event (สำหรับโหมด pan)
+    canvas.addEventListener('touchmove', e => {
+      if (mode !== 'pan') return;
+      e.preventDefault();
+
+      const touches = e.touches;
+      if (touches.length === 1 && isPanning) {
+        // pan ด้วยนิ้ว 1 นิ้ว
+        const dx = touches[0].clientX - panStartX;
+        const dy = touches[0].clientY - panStartY;
+        panStartX = touches[0].clientX;
+        panStartY = touches[0].clientY;
+        offsetX += dx;
+        offsetY += dy;
+        drawLines(currentPage);
+      } else if (touches.length === 2) {
+        // pinch zoom ด้วย 2 นิ้ว
+        const dist = getDistance(touches);
+        if (lastDist) {
+          let zoom = dist / lastDist;
+          let newScale = scale * zoom;
+          // กำหนดขอบเขต zoom
+          newScale = Math.min(Math.max(newScale, 0.5), 5);
+          // คำนวณตำแหน่งแกนกลาง pinch เพื่อ zoom แบบ centered
+          const rect = canvas.getBoundingClientRect();
+          const centerX = (touches[0].clientX + touches[1].clientX) / 2 - rect.left;
+          const centerY = (touches[0].clientY + touches[1].clientY) / 2 - rect.top;
+
+          // ปรับ offsetX, offsetY เพื่อ zoom ที่จุดกลางนิ้ว
+          offsetX = centerX - ((centerX - offsetX) * (newScale / scale));
+          offsetY = centerY - ((centerY - offsetY) * (newScale / scale));
+
+          scale = newScale;
+          drawLines(currentPage);
+        }
+        lastDist = dist;
       }
     }, { passive: false });
 
-    canvas.addEventListener('touchmove', e => {
-      if (mode === 'pan' && isPanning) {
-        e.preventDefault();
-        canvasTranslateX = e.touches[0].clientX - panStartX;
-        canvasTranslateY = e.touches[0].clientY - panStartY;
-        canvas.style.transform = `translate(${canvasTranslateX}px, ${canvasTranslateY}px)`;
+    canvas.addEventListener('touchstart', e => {
+      if (mode !== 'pan') return;
+      if (e.touches.length === 1) {
+        isPanning = true;
+        panStartX = e.touches[0].clientX;
+        panStartY = e.touches[0].clientY;
+      } else {
+        isPanning = false;
       }
-    }, { passive: false });
+      lastDist = null;
+    });
 
     canvas.addEventListener('touchend', e => {
-      if (mode === 'draw') {
-        e.preventDefault();
-        if (!isDrawing) return;
-        isDrawing = false;
-        const pos = getEventPos(e);
-        const endX = pos.x;
-        const endY = pos.y;
-        lineCounts[currentPage]++;
-        lines[currentPage].push({
-          startX, startY, endX, endY, index: lineCounts[currentPage]
-        });
-        saveLinesToStorage();
-        drawLines(currentPage);
-      } else if (mode === 'pan') {
-        e.preventDefault();
-        isPanning = false;
-        canvas.style.cursor = 'grab';
+      if (mode !== 'pan') return;
+      if (e.touches.length < 2) {
+        lastDist = null;
       }
-    }, { passive: false });
+      if (e.touches.length === 0) {
+        isPanning = false;
+      }
+    });
+
+    // ปุ่มสลับโหมด
+    btnDraw.addEventListener('click', () => {
+      enableDrawMode();
+    });
+    btnPan.addEventListener('click', () => {
+      enablePanMode();
+    });
 
     function prevPage() {
       if (currentPage <= 1) return;
       currentPage--;
+      offsetX = 0; offsetY = 0; scale = 1;
       renderPage(currentPage);
     }
 
     function nextPage() {
       if (currentPage >= totalPages) return;
       currentPage++;
+      offsetX = 0; offsetY = 0; scale = 1;
       renderPage(currentPage);
     }
 
@@ -367,7 +427,6 @@
       for (let i = 1; i <= totalPages; i++) {
         await renderPageWithoutLines(i);
         drawLines(i);
-        // รอให้ canvas วาดเสร็จก่อน capture รูป
         await new Promise(r => setTimeout(r, 200));
         const imgData = canvas.toDataURL('image/png');
         if (i > 1) pdf.addPage();
