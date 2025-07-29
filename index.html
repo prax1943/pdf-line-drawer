@@ -107,8 +107,7 @@
     let lineCounts = {};
     let pdfFingerprint = null;
 
-    // เก็บภาพหน้า PDF ปัจจุบัน
-    let pdfPageImage = null;
+    let pdfPageImages = {}; // เก็บ image ของแต่ละหน้า
 
     // Pan & zoom vars
     let mode = 'draw'; // 'draw' หรือ 'pan'
@@ -118,10 +117,11 @@
     let isPanning = false;
     let panStartX = 0, panStartY = 0;
 
+    // ปรับขนาด canvas ตามขนาดภาพ
     function resizeCanvas(width, height) {
       const maxWidth = window.innerWidth - 20;
       let scaleFactor = 1;
-      if(width > maxWidth) {
+      if (width > maxWidth) {
         scaleFactor = maxWidth / width;
       }
       canvas.width = width * scaleFactor;
@@ -145,57 +145,57 @@
         for (let i = 1; i <= totalPages; i++) {
           if (!lines[i]) lines[i] = [];
           if (!lineCounts[i]) lineCounts[i] = lines[i].length;
+          await renderPageImage(i);
         }
         currentPage = 1;
         offsetX = 0;
         offsetY = 0;
         scale = 1;
-        await renderPage(currentPage);
+        drawCurrentView();
+        pageNumSpan.textContent = currentPage;
       };
       fileReader.readAsArrayBuffer(file);
     });
 
-    async function renderPage(num) {
+    // สร้างภาพเก็บไว้ของแต่ละหน้า PDF
+    async function renderPageImage(num) {
       const page = await pdfDoc.getPage(num);
-      // ใช้ scale สูงเพื่อภาพชัดเจน (แก้ไข scale ตามขนาดจริง)
       const viewport = page.getViewport({ scale: 2 });
-
-      // เตรียม canvas ชั่วคราวเพื่อเรนเดอร์ PDF
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = viewport.width;
       tempCanvas.height = viewport.height;
       const tempCtx = tempCanvas.getContext('2d');
-
       await page.render({ canvasContext: tempCtx, viewport }).promise;
 
-      // สร้าง image จาก canvas นี้เก็บไว้ใช้วาดซ้ำ (ลดการ render PDF ซ้ำ)
-      pdfPageImage = new Image();
-      pdfPageImage.src = tempCanvas.toDataURL();
-
-      pdfPageImage.onload = () => {
-        // ปรับขนาด canvas ตัวจริงให้พอดีกับภาพ
-        const scaleFactor = resizeCanvas(viewport.width, viewport.height);
-        offsetX = 0;
-        offsetY = 0;
-        scale = scaleFactor;
-
-        drawCurrentView();
-        pageNumSpan.textContent = num;
-      };
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          pdfPageImages[num] = {
+            img,
+            width: viewport.width,
+            height: viewport.height
+          };
+          resolve();
+        };
+        img.src = tempCanvas.toDataURL();
+      });
     }
 
     function drawCurrentView() {
-      if (!pdfPageImage) return;
+      const pageImage = pdfPageImages[currentPage];
+      if (!pageImage) return;
 
       // เคลียร์ canvas พร้อม reset transform ก่อนวาดใหม่
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // วาดภาพหน้า PDF พร้อม pan + zoom
+      // ปรับ canvas ตาม scale และ offset (pan)
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
-      ctx.drawImage(pdfPageImage, 0, 0);
 
-      // วาดเส้นที่ขีดไว้บนหน้าปัจจุบัน
+      // วาดภาพหน้า PDF
+      ctx.drawImage(pageImage.img, 0, 0);
+
+      // วาดเส้นของหน้าปัจจุบัน (ปรับความหนาและขนาดฟอนต์ให้ไม่เปลี่ยนตาม zoom)
       ctx.strokeStyle = 'red';
       ctx.lineWidth = 2 / scale;
       ctx.font = `${18 / scale}px sans-serif`;
@@ -231,21 +231,21 @@
       };
     }
 
-    // ฟังก์ชันช่วยคำนวณระยะห่างสองจุด (สำหรับ pinch zoom)
+    // คำนวณระยะห่างสองจุด (pinch zoom)
     function getDistance(touches) {
       const dx = touches[0].clientX - touches[1].clientX;
       const dy = touches[0].clientY - touches[1].clientY;
-      return Math.sqrt(dx*dx + dy*dy);
+      return Math.sqrt(dx * dx + dy * dy);
     }
 
-    // โหมดขีดเส้น (draw mode)
+    // โหมดขีดเส้น
     function enableDrawMode() {
       mode = 'draw';
       canvas.style.cursor = 'crosshair';
       btnDraw.classList.add('active');
       btnPan.classList.remove('active');
     }
-    // โหมดเลื่อน/ซูม (pan mode)
+    // โหมดเลื่อน/ซูม
     function enablePanMode() {
       mode = 'pan';
       canvas.style.cursor = 'grab';
@@ -253,7 +253,7 @@
       btnPan.classList.add('active');
     }
 
-    // เหตุการณ์ขีดเส้น (mouse + touch)
+    // วาดเส้น - mouse/touch
     canvas.addEventListener('mousedown', e => {
       if (mode !== 'draw') return;
       isDrawing = true;
@@ -268,7 +268,7 @@
       const endX = pos.x;
       const endY = pos.y;
       lineCounts[currentPage]++;
-      lines[currentPage].push({startX, startY, endX, endY, index: lineCounts[currentPage]});
+      lines[currentPage].push({ startX, startY, endX, endY, index: lineCounts[currentPage] });
       saveLinesToStorage();
       drawCurrentView();
     });
@@ -293,12 +293,12 @@
       const endX = pos.x;
       const endY = pos.y;
       lineCounts[currentPage]++;
-      lines[currentPage].push({startX, startY, endX, endY, index: lineCounts[currentPage]});
+      lines[currentPage].push({ startX, startY, endX, endY, index: lineCounts[currentPage] });
       saveLinesToStorage();
       drawCurrentView();
     }, { passive: false });
 
-    // ตัวแปรเก็บสถานะ pan
+    // pan/zoom - touch events
     canvas.addEventListener('touchstart', e => {
       if (mode !== 'pan') return;
       if (e.touches.length === 1) {
@@ -349,7 +349,28 @@
       lastDist = null;
     });
 
-    // ปุ่มเปลี่ยนโหมด
+    // pan/zoom - mouse wheel (desktop)
+    canvas.addEventListener('wheel', e => {
+      if (mode !== 'pan') return;
+      e.preventDefault();
+
+      const delta = -e.deltaY;
+      let zoom = delta > 0 ? 1.1 : 0.9;
+      let newScale = scale * zoom;
+      newScale = Math.min(Math.max(newScale, 0.5), 5);
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      offsetX = mouseX - ((mouseX - offsetX) * (newScale / scale));
+      offsetY = mouseY - ((mouseY - offsetY) * (newScale / scale));
+
+      scale = newScale;
+      drawCurrentView();
+    }, { passive: false });
+
+    // ปุ่มโหมด
     btnDraw.onclick = () => enableDrawMode();
     btnPan.onclick = () => enablePanMode();
 
@@ -367,18 +388,21 @@
     async function prevPage() {
       if (currentPage <= 1) return;
       currentPage--;
-      offsetX = 0;
-      offsetY = 0;
-      scale = 1;
-      await renderPage(currentPage);
+      resetPanZoom();
+      drawCurrentView();
+      pageNumSpan.textContent = currentPage;
     }
     async function nextPage() {
       if (currentPage >= totalPages) return;
       currentPage++;
+      resetPanZoom();
+      drawCurrentView();
+      pageNumSpan.textContent = currentPage;
+    }
+    function resetPanZoom() {
       offsetX = 0;
       offsetY = 0;
       scale = 1;
-      await renderPage(currentPage);
     }
 
     // บันทึกข้อมูลเส้นและนับเส้นเก็บ localStorage
@@ -403,7 +427,30 @@
       }
     }
 
-    // บันทึก PDF เป็นไฟล์ (จะบันทึกหน้าเดียวในขนาด canvas ปัจจุบัน)
+    // ฟังก์ชันวาดเส้นเฉพาะหน้าที่ระบุ (ใช้ตอน save PDF)
+    function drawLinesForPage(pageNum) {
+      const pageImage = pdfPageImages[pageNum];
+      if (!pageImage) return;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(pageImage.img, 0, 0);
+
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 2;
+      ctx.font = '18px sans-serif';
+      ctx.fillStyle = 'blue';
+
+      for (let line of lines[pageNum] || []) {
+        ctx.beginPath();
+        ctx.moveTo(line.startX, line.startY);
+        ctx.lineTo(line.endX, line.endY);
+        ctx.stroke();
+        ctx.fillText(line.index, line.endX + 5, line.endY);
+      }
+    }
+
+    // บันทึก PDF เป็นไฟล์ (วาดแต่ละหน้าพร้อมเส้นของหน้านั้น)
     async function savePDF() {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
 
@@ -414,8 +461,7 @@
       });
 
       for (let i = 1; i <= totalPages; i++) {
-        await renderPage(i);
-        drawCurrentView();
+        drawLinesForPage(i);
 
         // delay ให้แน่ใจว่าภาพโหลดเสร็จ
         await new Promise(r => setTimeout(r, 200));
