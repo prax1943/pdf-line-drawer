@@ -113,6 +113,40 @@
       user-select: none;
       pointer-events: none;
     }
+    .save-progress-bar {
+      width: 80px;
+      height: 20px;
+      background: #eee;
+      border-radius: 10px;
+      margin-top: 4px;
+      margin-bottom: 3px;
+      overflow: hidden;
+      position: relative;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .save-progress-bar-inner {
+      background: linear-gradient(90deg, #4caf50 0%, #2196f3 100%);
+      height: 100%;
+      width: 0%;
+      transition: width 0.2s;
+      border-radius: 10px 0 0 10px;
+    }
+    .save-progress-text {
+      position: absolute;
+      width: 100%;
+      text-align: center;
+      color: #222;
+      font-size: 0.92rem;
+      font-weight: bold;
+      left: 0; top: 0;
+      line-height: 20px;
+      user-select: none;
+      pointer-events: none;
+      letter-spacing: 1px;
+      text-shadow: 0 1px 2px #fff, 0 0 2px #fff;
+    }
     @media (max-width: 900px) {
       .controls-side { right: 0.5vw; }
     }
@@ -130,6 +164,13 @@
         font-size: 1rem;
         min-width: 42px;
       }
+      .save-progress-bar {
+        width: 60px; height: 18px;
+      }
+      .save-progress-text {
+        font-size: 0.78rem;
+        line-height: 18px;
+      }
     }
   </style>
 </head>
@@ -144,6 +185,10 @@
     <button id="btn-pan" title="โหมดเลื่อน/ซูม">✋</button>
     <button id="btn-undo" title="ลบเส้นล่าสุด">↩️</button>
     <button id="btn-save" title="บันทึกเป็น PDF">💾</button>
+    <div class="save-progress-bar" id="save-progress-bar">
+      <div class="save-progress-bar-inner" id="save-progress-bar-inner"></div>
+      <div class="save-progress-text" id="save-progress-text">0%</div>
+    </div>
   </div>
   <div class="controls-side-spacer"></div>
   <div id="pdf-container" class="pdf-container"></div>
@@ -160,11 +205,14 @@
     const btnUp = document.getElementById('btn-up');
     const btnDown = document.getElementById('btn-down');
     const pageIndicator = document.getElementById('page-indicator');
+    const saveProgressBar = document.getElementById('save-progress-bar');
+    const saveProgressBarInner = document.getElementById('save-progress-bar-inner');
+    const saveProgressText = document.getElementById('save-progress-text');
 
     let pdfDoc = null;
     let totalPages = 0;
     let pdfFingerprint = null;
-    let mode = 'draw'; // 'draw' หรือ 'pan'
+    let mode = 'draw';
 
     let lines = {};
     let canvases = [];
@@ -277,7 +325,7 @@
         canvases[pageNum] = canvas;
         pageStates[pageNum] = {
           offsetX: 0, offsetY: 0,
-          scale: 1, // <--- ขนาดปกติ ไม่ย่ออัตโนมัติ
+          scale: 1,
           isDrawing: false,
           isPanning: false, panStartX: 0, panStartY: 0, lastDist: null,
           startX: 0, startY: 0, img: pdfPageImage
@@ -437,8 +485,8 @@
       ctx.drawImage(img, 0, 0);
 
       ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2; // <--- ขนาดเส้นและฟอนต์คงที่ ไม่เกี่ยวกับซูม
-      ctx.font = `18px sans-serif`; // <--- ขนาดเส้นและฟอนต์คงที่ ไม่เกี่ยวกับซูม
+      ctx.lineWidth = 2;
+      ctx.font = `18px sans-serif`;
       ctx.fillStyle = 'blue';
       for (let line of lines[pageNum] || []) {
         ctx.beginPath();
@@ -484,6 +532,11 @@
         format: [pageWidth, pageHeight]
       });
 
+      // Show progress bar
+      saveProgressBar.style.display = "flex";
+      saveProgressBarInner.style.width = "0%";
+      saveProgressText.textContent = "0%";
+
       for (let i = 1; i <= totalPages; i++) {
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = pageWidth;
@@ -506,7 +559,18 @@
         const imgData = tempCanvas.toDataURL('image/png');
         if (i > 1) pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight);
+
+        // Update progress
+        const percent = Math.round((i / totalPages) * 100);
+        saveProgressBarInner.style.width = percent + "%";
+        saveProgressText.textContent = percent + "%";
       }
+
+      saveProgressText.textContent = "เสร็จสิ้น";
+      setTimeout(() => {
+        saveProgressBar.style.display = "none";
+      }, 900);
+
       pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
     };
 
@@ -530,7 +594,6 @@
       }, 250);
     }, { passive: true });
 
-    // For normal scroll (not inside pdfContainer, but window), also update indicator
     window.addEventListener('scroll', function () {
       let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
       let best = 1, bestDist = Infinity;
