@@ -2,295 +2,225 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>โปรแกรมขีดเส้นบน PDF (หลายหน้า) - รองรับมือถือและแท็บเล็ต</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ขีดเส้นบน PDF</title>
   <style>
     body {
       font-family: sans-serif;
-      margin: 10px;
+      margin: 0;
+      padding: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
-      -webkit-user-select: none;
-      -webkit-touch-callout: none;
-      overscroll-behavior: contain; /* ป้องกัน scroll ออกนอกหน้าจอเวลาสัมผัส */
     }
     canvas {
-      border: 1px solid black;
-      cursor: crosshair;
-      max-width: 100vw;
+      border: 1px solid #ccc;
+      margin-top: 10px;
+      max-width: 100%;
       height: auto;
-      touch-action: none; /* ป้องกัน gesture zoom หรือ pan */
-      background: white;
     }
-    .controls {
-      margin-top: 15px;
+    #toolbar {
       display: flex;
       flex-wrap: wrap;
-      justify-content: center;
       gap: 10px;
-      width: 100%;
-      max-width: 600px;
+      margin: 10px;
+      justify-content: center;
     }
-    button {
-      font-size: 18px;
-      padding: 12px 20px;
-      border-radius: 6px;
-      border: 1px solid #333;
-      background: #f0f0f0;
-      cursor: pointer;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      flex-grow: 1;
-      min-width: 120px;
+    button, input {
+      padding: 8px 12px;
+      font-size: 16px;
     }
-    button:active {
-      background: #ddd;
-    }
-    input[type="file"] {
-      font-size: 18px;
-      margin-bottom: 10px;
-      max-width: 100%;
-    }
-    span.page-info {
-      font-size: 18px;
-      line-height: 36px;
-      min-width: 100px;
-      text-align: center;
-      user-select: none;
+    label {
+      margin-right: 5px;
     }
   </style>
 </head>
 <body>
-  <h2>อยากให้แก้ตรงไหนบอก ไม่ต้องกลัวว่าปิดเครื่องหรือออกเว็บแล้วจะเส้นจะหายพี่เซฟข้อมูลไว้ให้แล้วจะได้ไม่ต้องทำใหม่
-    แค่เปิดไฟล์ PDF เดิมที่เคยทำไว้แล้วเส้นมันจะกลับมา</h2>
-  <input type="file" id="pdf-upload" accept="application/pdf" />
-  <div class="controls">
-    <button onclick="prevPage()">⬅️ หน้าก่อนหน้า</button>
-    <span class="page-info">หน้า: <span id="page-num">1</span> / <span id="page-count">1</span></span>
-    <button onclick="nextPage()">หน้าถัดไป ➡️</button>
-    <button onclick="undo()">↩️ ย้อนกลับ</button>
-    <button onclick="savePDF()">💾 บันทึกเป็น PDF</button>
+  <h2>ขีดเส้นบน PDF</h2>
+  <div id="toolbar">
+    <label>อัปโหลด PDF: <input type="file" id="fileInput" accept="application/pdf" /></label>
+    <button id="prevPage">หน้าก่อนหน้า</button>
+    <button id="nextPage">หน้าถัดไป</button>
+    <button id="undo">ย้อนกลับ</button>
+    <button id="clear">ลบทั้งหมด</button>
+    <button id="savePdf">บันทึก PDF</button>
   </div>
-  <canvas id="pdf-canvas"></canvas>
+  <canvas id="pdfCanvas"></canvas>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
-    const input = document.getElementById('pdf-upload');
-    const canvas = document.getElementById('pdf-canvas');
-    const ctx = canvas.getContext('2d');
-    const pageNumSpan = document.getElementById('page-num');
-    const pageCountSpan = document.getElementById('page-count');
-
-    let pdfDoc = null;
-    let currentPage = 1;
-    let totalPages = 0;
-    let isDrawing = false;
+    const canvas = document.getElementById("pdfCanvas");
+    const ctx = canvas.getContext("2d");
+    let pdfDoc = null, currentPage = 1, scale = 1, drawing = false;
+    let lines = {}, currentLines = [], undone = [];
     let startX = 0, startY = 0;
-    let lines = {};
-    let lineCounts = {};
-    let pdfFingerprint = null;
+    let pageRendering = false;
 
-    // ปรับขนาด canvas ตามความกว้างหน้าจอ (ทำให้เหมาะกับมือถือ/แท็บเล็ต)
+    function saveToStorage() {
+      localStorage.setItem("pdfLines", JSON.stringify(lines));
+    }
+
+    function loadFromStorage() {
+      const data = localStorage.getItem("pdfLines");
+      if (data) lines = JSON.parse(data);
+    }
+
+    function renderPage(num) {
+      pageRendering = true;
+      pdfDoc.getPage(num).then((page) => {
+        const viewport = page.getViewport({ scale: 1 });
+        scale = resizeCanvas(viewport);
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: page.getViewport({ scale }),
+        };
+        return page.render(renderContext).promise;
+      }).then(() => {
+        drawLines();
+        pageRendering = false;
+      });
+    }
+
     function resizeCanvas(viewport) {
-      // ใช้ scale ตาม viewport แต่ถ้าหน้าจอแคบกว่าก็ปรับขนาดให้เล็กลง
-      const maxWidth = window.innerWidth - 20; // ลบ margin
-      let scale = 1.5;
-      let width = viewport.width * scale;
-      let height = viewport.height * scale;
+      const dpr = window.devicePixelRatio || 1;
+      const maxWidth = window.innerWidth - 20;
+      let newScale = 1.5;
+      let width = viewport.width * newScale;
+      let height = viewport.height * newScale;
+
       if (width > maxWidth) {
-        scale = maxWidth / viewport.width;
-        width = viewport.width * scale;
-        height = viewport.height * scale;
+        newScale = maxWidth / viewport.width;
+        width = viewport.width * newScale;
+        height = viewport.height * newScale;
       }
-      canvas.width = width;
-      canvas.height = height;
-      return scale;
+
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      return newScale;
     }
 
-    function getEventPos(evt) {
+    function drawLines() {
+      ctx.lineWidth = 1 * scale;
+      ctx.strokeStyle = "red";
+      ctx.font = `${12 * scale}px sans-serif`;
+      ctx.fillStyle = "blue";
+
+      ctx.beginPath();
+      (lines[currentPage] || []).forEach((line, i) => {
+        ctx.moveTo(line.x1, line.y1);
+        ctx.lineTo(line.x2, line.y2);
+        const midX = (line.x1 + line.x2) / 2;
+        const midY = (line.y1 + line.y2) / 2;
+        ctx.fillText(`${i + 1}`, midX + 5, midY - 5);
+      });
+      ctx.stroke();
+    }
+
+    canvas.addEventListener("mousedown", (e) => {
+      drawing = true;
       const rect = canvas.getBoundingClientRect();
-      if (evt.touches && evt.touches.length > 0) {
-        return {
-          x: evt.touches[0].clientX - rect.left,
-          y: evt.touches[0].clientY - rect.top
-        };
-      } else if (evt.changedTouches && evt.changedTouches.length > 0) {
-        return {
-          x: evt.changedTouches[0].clientX - rect.left,
-          y: evt.changedTouches[0].clientY - rect.top
-        };
-      } else {
-        return {
-          x: evt.offsetX,
-          y: evt.offsetY
-        };
-      }
-    }
+      startX = (e.clientX - rect.left) / (canvas.clientWidth / canvas.width);
+      startY = (e.clientY - rect.top) / (canvas.clientHeight / canvas.height);
+    });
 
-    function saveLinesToStorage() {
-      if (!pdfFingerprint) return;
-      const key = `pdfLines_${pdfFingerprint}`;
-      localStorage.setItem(key, JSON.stringify({lines, lineCounts}));
-    }
+    canvas.addEventListener("mouseup", (e) => {
+      if (!drawing) return;
+      drawing = false;
+      const rect = canvas.getBoundingClientRect();
+      const endX = (e.clientX - rect.left) / (canvas.clientWidth / canvas.width);
+      const endY = (e.clientY - rect.top) / (canvas.clientHeight / canvas.height);
+      const line = { x1: startX, y1: startY, x2: endX, y2: endY };
 
-    function loadLinesFromStorage() {
-      if (!pdfFingerprint) return;
-      const key = `pdfLines_${pdfFingerprint}`;
-      const data = localStorage.getItem(key);
-      if (data) {
-        try {
-          const obj = JSON.parse(data);
-          lines = obj.lines || {};
-          lineCounts = obj.lineCounts || {};
-        } catch {
-          lines = {};
-          lineCounts = {};
-        }
-      }
-    }
+      lines[currentPage] = lines[currentPage] || [];
+      lines[currentPage].push(line);
+      undone = [];
+      saveToStorage();
+      renderPage(currentPage);
+    });
 
-    input.addEventListener('change', async (e) => {
+    document.getElementById("fileInput").addEventListener("change", (e) => {
       const file = e.target.files[0];
-      if (!file) return;
-      const fileReader = new FileReader();
-      fileReader.onload = async function () {
-        const typedArray = new Uint8Array(this.result);
-        pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
-        totalPages = pdfDoc.numPages;
-        pageCountSpan.textContent = totalPages;
-        pdfFingerprint = pdfDoc.fingerprints ? pdfDoc.fingerprints[0] : null;
-
-        loadLinesFromStorage();
-
-        for (let i = 1; i <= totalPages; i++) {
-          if (!lines[i]) lines[i] = [];
-          if (!lineCounts[i]) lineCounts[i] = lines[i].length;
-        }
-        currentPage = 1;
-        renderPage(currentPage);
-      };
-      fileReader.readAsArrayBuffer(file);
+      if (file && file.type === "application/pdf") {
+        const reader = new FileReader();
+        reader.onload = function () {
+          const typedarray = new Uint8Array(this.result);
+          pdfjsLib.getDocument({ data: typedarray }).promise.then((pdf) => {
+            pdfDoc = pdf;
+            currentPage = 1;
+            loadFromStorage();
+            renderPage(currentPage);
+          });
+        };
+        reader.readAsArrayBuffer(file);
+      }
     });
 
-    async function renderPage(num) {
-      const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 1 });
-      const scale = resizeCanvas(viewport);
-      const scaledViewport = page.getViewport({ scale });
-
-      // ใช้ scaledViewport เพื่อเรนเดอร์จริง
-      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-      drawLines(num);
-      pageNumSpan.textContent = num;
-    }
-
-    function drawLines(pageNum) {
-      renderPageWithoutLines(pageNum).then(() => {
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = 2;
-        ctx.font = '18px sans-serif';
-        ctx.fillStyle = 'blue';
-        for (let line of lines[pageNum]) {
-          ctx.beginPath();
-          ctx.moveTo(line.startX, line.startY);
-          ctx.lineTo(line.endX, line.endY);
-          ctx.stroke();
-          ctx.fillText(line.index, line.endX + 5, line.endY);
-        }
-      });
-    }
-
-    async function renderPageWithoutLines(num) {
-      const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 1 });
-      const scale = resizeCanvas(viewport);
-      const scaledViewport = page.getViewport({ scale });
-
-      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-    }
-
-    canvas.addEventListener('mousedown', e => {
-      isDrawing = true;
-      const pos = getEventPos(e);
-      startX = pos.x;
-      startY = pos.y;
-    });
-    canvas.addEventListener('mouseup', e => {
-      if (!isDrawing) return;
-      isDrawing = false;
-      const pos = getEventPos(e);
-      const endX = pos.x;
-      const endY = pos.y;
-      lineCounts[currentPage]++;
-      lines[currentPage].push({
-        startX, startY, endX, endY, index: lineCounts[currentPage]
-      });
-      saveLinesToStorage();
-      drawLines(currentPage);
-    });
-
-    canvas.addEventListener('touchstart', e => {
-      e.preventDefault();
-      isDrawing = true;
-      const pos = getEventPos(e);
-      startX = pos.x;
-      startY = pos.y;
-    }, { passive: false });
-    canvas.addEventListener('touchend', e => {
-      e.preventDefault();
-      if (!isDrawing) return;
-      isDrawing = false;
-      const pos = getEventPos(e);
-      const endX = pos.x;
-      const endY = pos.y;
-      lineCounts[currentPage]++;
-      lines[currentPage].push({
-        startX, startY, endX, endY, index: lineCounts[currentPage]
-      });
-      saveLinesToStorage();
-      drawLines(currentPage);
-    }, { passive: false });
-
-    function prevPage() {
-      if (currentPage <= 1) return;
+    document.getElementById("prevPage").addEventListener("click", () => {
+      if (currentPage <= 1 || pageRendering) return;
       currentPage--;
       renderPage(currentPage);
-    }
+    });
 
-    function nextPage() {
-      if (currentPage >= totalPages) return;
+    document.getElementById("nextPage").addEventListener("click", () => {
+      if (currentPage >= pdfDoc.numPages || pageRendering) return;
       currentPage++;
       renderPage(currentPage);
-    }
+    });
 
-    function undo() {
-      if (lines[currentPage] && lines[currentPage].length > 0) {
-        lines[currentPage].pop();
-        lineCounts[currentPage] = lines[currentPage].length;
-        saveLinesToStorage();
-        drawLines(currentPage);
+    document.getElementById("undo").addEventListener("click", () => {
+      if (lines[currentPage]?.length) {
+        undone.push(lines[currentPage].pop());
+        saveToStorage();
+        renderPage(currentPage);
       }
-    }
+    });
 
-    async function savePDF() {
+    document.getElementById("clear").addEventListener("click", () => {
+      lines[currentPage] = [];
+      saveToStorage();
+      renderPage(currentPage);
+    });
+
+    document.getElementById("savePdf").addEventListener("click", async () => {
       const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({
-        unit: 'pt',
-        format: [canvas.width, canvas.height]
-      });
-      for (let i = 1; i <= totalPages; i++) {
-        await renderPageWithoutLines(i);
-        drawLines(i);
-        await new Promise(r => setTimeout(r, 200));
-        const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF();
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 2 });
+        const tmpCanvas = document.createElement("canvas");
+        const tmpCtx = tmpCanvas.getContext("2d");
+
+        tmpCanvas.width = viewport.width;
+        tmpCanvas.height = viewport.height;
+        await page.render({ canvasContext: tmpCtx, viewport }).promise;
+
+        tmpCtx.lineWidth = 2;
+        tmpCtx.strokeStyle = "red";
+        tmpCtx.fillStyle = "blue";
+        tmpCtx.font = "24px sans-serif";
+
+        (lines[i] || []).forEach((line, index) => {
+          tmpCtx.beginPath();
+          tmpCtx.moveTo(line.x1 * 2 / scale, line.y1 * 2 / scale);
+          tmpCtx.lineTo(line.x2 * 2 / scale, line.y2 * 2 / scale);
+          tmpCtx.stroke();
+          const midX = (line.x1 + line.x2) / 2 * 2 / scale;
+          const midY = (line.y1 + line.y2) / 2 * 2 / scale;
+          tmpCtx.fillText(`${index + 1}`, midX + 5, midY - 5);
+        });
+
+        const imgData = tmpCanvas.toDataURL("image/png");
         if (i > 1) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.addImage(imgData, "PNG", 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
       }
-      pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
-    }
+
+      pdf.save("pdfพร้อมเส้น.pdf");
+    });
   </script>
 </body>
 </html>
