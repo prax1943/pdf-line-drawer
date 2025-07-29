@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>โปรแกรมขีดเส้นบน PDF (หลายหน้า) - เก็บข้อมูลเส้น</title>
+  <title>โปรแกรมขีดเส้นบน PDF (หลายหน้า) - รองรับมือถือและแท็บเล็ต</title>
   <style>
     body {
       font-family: sans-serif;
@@ -13,13 +13,15 @@
       align-items: center;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
+      overscroll-behavior: contain; /* ป้องกัน scroll ออกนอกหน้าจอเวลาสัมผัส */
     }
     canvas {
       border: 1px solid black;
       cursor: crosshair;
       max-width: 100vw;
       height: auto;
-      touch-action: none;
+      touch-action: none; /* ป้องกัน gesture zoom หรือ pan */
+      background: white;
     }
     .controls {
       margin-top: 15px;
@@ -27,10 +29,12 @@
       flex-wrap: wrap;
       justify-content: center;
       gap: 10px;
+      width: 100%;
+      max-width: 600px;
     }
     button {
       font-size: 18px;
-      padding: 10px 18px;
+      padding: 12px 20px;
       border-radius: 6px;
       border: 1px solid #333;
       background: #f0f0f0;
@@ -38,6 +42,8 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-tap-highlight-color: transparent;
+      flex-grow: 1;
+      min-width: 120px;
     }
     button:active {
       background: #ddd;
@@ -45,10 +51,14 @@
     input[type="file"] {
       font-size: 18px;
       margin-bottom: 10px;
+      max-width: 100%;
     }
     span.page-info {
       font-size: 18px;
       line-height: 36px;
+      min-width: 100px;
+      text-align: center;
+      user-select: none;
     }
   </style>
 </head>
@@ -81,14 +91,36 @@
     let startX = 0, startY = 0;
     let lines = {};
     let lineCounts = {};
-    let pdfFingerprint = null; // รหัสประจำ PDF สำหรับเก็บ localStorage
+    let pdfFingerprint = null;
+
+    // ปรับขนาด canvas ตามความกว้างหน้าจอ (ทำให้เหมาะกับมือถือ/แท็บเล็ต)
+    function resizeCanvas(viewport) {
+      // ใช้ scale ตาม viewport แต่ถ้าหน้าจอแคบกว่าก็ปรับขนาดให้เล็กลง
+      const maxWidth = window.innerWidth - 20; // ลบ margin
+      let scale = 1.5;
+      let width = viewport.width * scale;
+      let height = viewport.height * scale;
+      if (width > maxWidth) {
+        scale = maxWidth / viewport.width;
+        width = viewport.width * scale;
+        height = viewport.height * scale;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      return scale;
+    }
 
     function getEventPos(evt) {
       const rect = canvas.getBoundingClientRect();
-      if (evt.touches) {
+      if (evt.touches && evt.touches.length > 0) {
         return {
           x: evt.touches[0].clientX - rect.left,
           y: evt.touches[0].clientY - rect.top
+        };
+      } else if (evt.changedTouches && evt.changedTouches.length > 0) {
+        return {
+          x: evt.changedTouches[0].clientX - rect.left,
+          y: evt.changedTouches[0].clientY - rect.top
         };
       } else {
         return {
@@ -131,10 +163,8 @@
         pageCountSpan.textContent = totalPages;
         pdfFingerprint = pdfDoc.fingerprints ? pdfDoc.fingerprints[0] : null;
 
-        // โหลดเส้นเก่าถ้ามี
         loadLinesFromStorage();
 
-        // ถ้าไม่มีข้อมูลเส้นสำหรับแต่ละหน้า ให้สร้างใหม่
         for (let i = 1; i <= totalPages; i++) {
           if (!lines[i]) lines[i] = [];
           if (!lineCounts[i]) lineCounts[i] = lines[i].length;
@@ -147,15 +177,12 @@
 
     async function renderPage(num) {
       const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 1.5 });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = resizeCanvas(viewport);
+      const scaledViewport = page.getViewport({ scale });
 
-      const renderContext = {
-        canvasContext: ctx,
-        viewport: viewport,
-      };
-      await page.render(renderContext).promise;
+      // ใช้ scaledViewport เพื่อเรนเดอร์จริง
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
       drawLines(num);
       pageNumSpan.textContent = num;
     }
@@ -178,10 +205,11 @@
 
     async function renderPageWithoutLines(num) {
       const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 1.5 });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = resizeCanvas(viewport);
+      const scaledViewport = page.getViewport({ scale });
+
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
     }
 
     canvas.addEventListener('mousedown', e => {
@@ -210,22 +238,21 @@
       const pos = getEventPos(e);
       startX = pos.x;
       startY = pos.y;
-    });
+    }, { passive: false });
     canvas.addEventListener('touchend', e => {
       e.preventDefault();
       if (!isDrawing) return;
       isDrawing = false;
-      const rect = canvas.getBoundingClientRect();
-      const touch = e.changedTouches[0];
-      const endX = touch.clientX - rect.left;
-      const endY = touch.clientY - rect.top;
+      const pos = getEventPos(e);
+      const endX = pos.x;
+      const endY = pos.y;
       lineCounts[currentPage]++;
       lines[currentPage].push({
         startX, startY, endX, endY, index: lineCounts[currentPage]
       });
       saveLinesToStorage();
       drawLines(currentPage);
-    });
+    }, { passive: false });
 
     function prevPage() {
       if (currentPage <= 1) return;
