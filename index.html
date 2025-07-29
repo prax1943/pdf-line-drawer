@@ -406,7 +406,6 @@
       canvases.forEach(c => { if (c) c.style.cursor = 'grab'; });
     };
     btnUndo.onclick = () => {
-      // ลบเส้นล่าสุดของหน้าสุดท้ายที่มีเส้น
       for (let i = totalPages; i >= 1; i--) {
         if (lines[i] && lines[i].length > 0) {
           lines[i].pop();
@@ -417,20 +416,53 @@
       }
     };
 
+    // เซฟ PDF ขนาดต้นฉบับ (ไม่ตาม zoom/pan)
     btnSave.onclick = async function () {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
       const { jsPDF } = window.jspdf;
-      const firstCanvas = canvases[1];
+
+      // ใช้ scale 2 (หรือ scale เดิมที่ใช้ตอน renderPage)
+      const page = await pdfDoc.getPage(1);
+      const viewport = page.getViewport({ scale: 2 });
+      const pageWidth = viewport.width;
+      const pageHeight = viewport.height;
+
       const pdf = new jsPDF({
         unit: 'pt',
-        format: [firstCanvas.width, firstCanvas.height]
+        format: [pageWidth, pageHeight]
       });
+
       for (let i = 1; i <= totalPages; i++) {
+        // สร้าง temp canvas ขนาดเต็ม
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = pageWidth;
+        tempCanvas.height = pageHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // render PDF หน้า i ลงบน temp canvas
+        const pg = await pdfDoc.getPage(i);
+        const vp = pg.getViewport({ scale: 2 });
+        await pg.render({ canvasContext: tempCtx, viewport: vp }).promise;
+
+        // วาดเส้นทับ
+        tempCtx.strokeStyle = 'red';
+        tempCtx.lineWidth = 2;
+        tempCtx.font = `18px sans-serif`;
+        tempCtx.fillStyle = 'blue';
+        for (let line of lines[i] || []) {
+          tempCtx.beginPath();
+          tempCtx.moveTo(line.startX, line.startY);
+          tempCtx.lineTo(line.endX, line.endY);
+          tempCtx.stroke();
+          tempCtx.fillText(line.index, line.endX + 5, line.endY);
+        }
+
+        // ใส่เข้า PDF
+        const imgData = tempCanvas.toDataURL('image/png');
         if (i > 1) pdf.addPage();
-        drawCurrentView(i);
-        const imgData = canvases[i].toDataURL('image/png');
-        pdf.addImage(imgData, 'PNG', 0, 0, firstCanvas.width, firstCanvas.height);
+        pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight);
       }
+
       pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
     };
 
