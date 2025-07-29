@@ -157,7 +157,6 @@
 
     async function renderPage(num) {
       const page = await pdfDoc.getPage(num);
-      // ใช้ scale สูงเพื่อภาพชัดเจน (แก้ไข scale ตามขนาดจริง)
       const viewport = page.getViewport({ scale: 2 });
 
       // เตรียม canvas ชั่วคราวเพื่อเรนเดอร์ PDF
@@ -168,12 +167,10 @@
 
       await page.render({ canvasContext: tempCtx, viewport }).promise;
 
-      // สร้าง image จาก canvas นี้เก็บไว้ใช้วาดซ้ำ (ลดการ render PDF ซ้ำ)
       pdfPageImage = new Image();
       pdfPageImage.src = tempCanvas.toDataURL();
 
       pdfPageImage.onload = () => {
-        // ปรับขนาด canvas ตัวจริงให้พอดีกับภาพ
         const scaleFactor = resizeCanvas(viewport.width, viewport.height);
         offsetX = 0;
         offsetY = 0;
@@ -187,20 +184,18 @@
     function drawCurrentView() {
       if (!pdfPageImage) return;
 
-      // เคลียร์ canvas พร้อม reset transform ก่อนวาดใหม่
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // วาดภาพหน้า PDF พร้อม pan + zoom
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
       ctx.drawImage(pdfPageImage, 0, 0);
 
-      // วาดเส้นที่ขีดไว้บนหน้าปัจจุบัน
       ctx.strokeStyle = 'red';
       ctx.lineWidth = 2 / scale;
       ctx.font = `${18 / scale}px sans-serif`;
       ctx.fillStyle = 'blue';
 
+      // วาดเส้นเฉพาะหน้าปัจจุบัน
       for (let line of lines[currentPage] || []) {
         ctx.beginPath();
         ctx.moveTo(line.startX, line.startY);
@@ -231,21 +226,21 @@
       };
     }
 
-    // ฟังก์ชันช่วยคำนวณระยะห่างสองจุด (สำหรับ pinch zoom)
+    // คำนวณระยะห่างสองจุด (สำหรับ pinch zoom)
     function getDistance(touches) {
       const dx = touches[0].clientX - touches[1].clientX;
       const dy = touches[0].clientY - touches[1].clientY;
       return Math.sqrt(dx*dx + dy*dy);
     }
 
-    // โหมดขีดเส้น (draw mode)
+    // โหมดขีดเส้น
     function enableDrawMode() {
       mode = 'draw';
       canvas.style.cursor = 'crosshair';
       btnDraw.classList.add('active');
       btnPan.classList.remove('active');
     }
-    // โหมดเลื่อน/ซูม (pan mode)
+    // โหมดเลื่อน/ซูม
     function enablePanMode() {
       mode = 'pan';
       canvas.style.cursor = 'grab';
@@ -336,8 +331,8 @@
 
           offsetX = centerX - ((centerX - offsetX) * (newScale / scale));
           offsetY = centerY - ((centerY - offsetY) * (newScale / scale));
-
           scale = newScale;
+
           drawCurrentView();
         }
         lastDist = dist;
@@ -349,11 +344,11 @@
       lastDist = null;
     });
 
-    // ปุ่มเปลี่ยนโหมด
+    // ปุ่มสลับโหมด
     btnDraw.onclick = () => enableDrawMode();
     btnPan.onclick = () => enablePanMode();
 
-    // ปุ่มย้อนกลับลบเส้นล่าสุด
+    // ปุ่มย้อนกลับลบเส้นล่าสุดของหน้าปัจจุบัน
     function undo() {
       if (lines[currentPage] && lines[currentPage].length > 0) {
         lines[currentPage].pop();
@@ -363,7 +358,7 @@
       }
     }
 
-    // ปุ่มเปลี่ยนหน้า
+    // เปลี่ยนหน้า
     async function prevPage() {
       if (currentPage <= 1) return;
       currentPage--;
@@ -381,7 +376,7 @@
       await renderPage(currentPage);
     }
 
-    // บันทึกข้อมูลเส้นและนับเส้นเก็บ localStorage
+    // เก็บข้อมูลเส้นลง localStorage ตาม fingerprint PDF
     function saveLinesToStorage() {
       if (!pdfFingerprint) return;
       const key = `pdfLines_${pdfFingerprint}`;
@@ -403,26 +398,43 @@
       }
     }
 
-    // บันทึก PDF เป็นไฟล์ (จะบันทึกหน้าเดียวในขนาด canvas ปัจจุบัน)
+    // บันทึก PDF พร้อมเส้น (แต่ละหน้าแยกกัน)
     async function savePDF() {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
 
       const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({
-        unit: 'pt',
-        format: [canvas.width, canvas.height]
-      });
+      const pdf = new jsPDF();
 
       for (let i = 1; i <= totalPages; i++) {
-        await renderPage(i);
-        drawCurrentView();
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 2 });
 
-        // delay ให้แน่ใจว่าภาพโหลดเสร็จ
-        await new Promise(r => setTimeout(r, 200));
+        // canvas ชั่วคราวเรนเดอร์หน้า PDF นี้
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = viewport.width;
+        tempCanvas.height = viewport.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        await page.render({ canvasContext: tempCtx, viewport }).promise;
 
-        const imgData = canvas.toDataURL('image/png');
-        if (i > 1) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        // วาดเส้นหน้าที่ i ลง tempCanvas (ปรับ scale เส้นตาม viewport.scale)
+        tempCtx.strokeStyle = 'red';
+        tempCtx.lineWidth = 2;
+        tempCtx.font = '18px sans-serif';
+        tempCtx.fillStyle = 'blue';
+
+        const pageLines = lines[i] || [];
+        for (let line of pageLines) {
+          tempCtx.beginPath();
+          tempCtx.moveTo(line.startX, line.startY);
+          tempCtx.lineTo(line.endX, line.endY);
+          tempCtx.stroke();
+          tempCtx.fillText(line.index, line.endX + 5, line.endY);
+        }
+
+        const imgData = tempCanvas.toDataURL('image/png');
+
+        if (i > 1) pdf.addPage(viewport.width, viewport.height);
+        pdf.addImage(imgData, 'PNG', 0, 0, viewport.width, viewport.height);
       }
 
       pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
