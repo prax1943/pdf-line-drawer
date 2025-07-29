@@ -82,7 +82,6 @@
     .controls-side button:focus {
       border-color: #2196f3;
     }
-    /* Hide text selection highlight on tap */
     .controls-side button, .controls-side {
       -webkit-tap-highlight-color: transparent;
       -webkit-user-select: none;
@@ -94,7 +93,6 @@
       max-width: 100%;
       margin-top: 10px;
     }
-    /* Add space so side panel doesn't overlap pdf */
     .controls-side-spacer {
       width: 100vw;
       height: 0;
@@ -322,8 +320,10 @@
       };
     }
 
+    // แก้ไขตำแหน่งให้ตรงแม่นยำ
     function getEventPos(evt, pageNum) {
-      const rect = canvases[pageNum].getBoundingClientRect();
+      const canvas = canvases[pageNum];
+      const rect = canvas.getBoundingClientRect();
       let clientX, clientY;
       if (evt.touches && evt.touches.length > 0) {
         clientX = evt.touches[0].clientX;
@@ -332,12 +332,14 @@
         clientX = evt.changedTouches[0].clientX;
         clientY = evt.changedTouches[0].clientY;
       } else {
-        clientX = evt.clientX || evt.offsetX;
-        clientY = evt.clientY || evt.offsetY;
+        clientX = evt.clientX;
+        clientY = evt.clientY;
       }
+      const xInCanvas = (clientX - rect.left) * (canvas.width / rect.width);
+      const yInCanvas = (clientY - rect.top) * (canvas.height / rect.height);
       return {
-        x: (clientX - rect.left - pageStates[pageNum].offsetX) / pageStates[pageNum].scale,
-        y: (clientY - rect.top - pageStates[pageNum].offsetY) / pageStates[pageNum].scale
+        x: (xInCanvas - pageStates[pageNum].offsetX) / pageStates[pageNum].scale,
+        y: (yInCanvas - pageStates[pageNum].offsetY) / pageStates[pageNum].scale
       };
     }
     function getDistance(touches) {
