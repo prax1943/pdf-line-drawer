@@ -2,548 +2,363 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>ขีดเส้น PDF ทุกหน้า (แนวตั้ง)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Workspace PDF วาด/ซูม/แพนรวม</title>
   <style>
+    html,body { margin:0; padding:0; background:#efefef; height:100%; }
     body {
-      font-family: sans-serif;
-      margin: 10px;
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      font-family:sans-serif;
+    }
+    #toolbar {
+      margin: 10px 0 8px 0;
       display: flex;
-      flex-direction: column;
+      gap: 14px;
       align-items: center;
-      -webkit-user-select: none;
-      -webkit-touch-callout: none;
-      overscroll-behavior: contain;
-      box-sizing: border-box;
     }
-    .pdf-container {
-      width: 100%;
-      max-width: 900px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-top: 15px;
-    }
-    .pdf-page-wrap {
-      margin-bottom: 20px;
-      position: relative;
-    }
-    canvas {
+    #pdf-upload { font-size: 16px; }
+    #save-btn {
+      font-size: 1.4rem;
+      padding: 7px 18px;
+      border-radius: 7px;
       border: 1px solid #888;
-      display: block;
-      background: white;
-      max-width: 100vw;
-      height: auto;
+      background: #f0f0f0;
+      cursor: pointer;
+    }
+    #pdf-workspace {
+      background: #fff;
+      border: 1.5px solid #bbb;
       touch-action: none;
       user-select: none;
+      display: block;
+      margin: 0 auto 30px auto;
+      box-shadow:0 4px 20px #0002;
+      max-width: 100vw;
+      max-height: 90vh;
     }
-    /* Side controls */
-    .controls-side {
-      position: fixed;
-      top: 50%;
-      right: 2vw;
-      transform: translateY(-50%);
-      z-index: 999;
-      display: flex;
-      flex-direction: column;
-      gap: 22px;
-      background: rgba(255,255,255,0.93);
-      border-radius: 18px;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.10);
-      padding: 22px 16px;
-      align-items: center;
-      min-width: 64px;
-      max-width: 100px;
+    #hint {
+      font-size: 1rem;
+      color: #333;
+      margin-top: 0.6em;
     }
-    .controls-side button {
-      font-size: 2.1rem;
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      border: 2px solid #bbb;
-      background: white;
-      cursor: pointer;
-      user-select: none;
-      outline: none;
-      transition: background 0.2s, border-color 0.2s, color 0.2s;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .controls-side button.active {
-      background: #4caf50;
-      color: #fff;
-      border-color: #3e8e41;
-    }
-    .controls-side button:active:not(.active) {
-      background: #eee;
-    }
-    .controls-side button:focus {
-      border-color: #2196f3;
-    }
-    .controls-side button, .controls-side {
-      -webkit-tap-highlight-color: transparent;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-    input[type="file"] {
-      font-size: 18px;
-      margin-bottom: 10px;
-      max-width: 100%;
-      margin-top: 10px;
-    }
-    .controls-side-spacer {
-      width: 100vw;
-      height: 0;
-      pointer-events: none;
-    }
-    .page-indicator {
-      font-size: 1.1rem;
-      padding: 0.2em 0.5em;
-      margin-bottom: 4px;
-      border-radius: 7px;
-      color: #222;
-      background: #e7eaf9;
-      min-width: 56px;
-      text-align: center;
-      font-weight: bold;
-      margin-top: 3px;
-      margin-bottom: 3px;
-      user-select: none;
-      pointer-events: none;
-    }
-    @media (max-width: 900px) {
-      .controls-side { right: 0.5vw; }
-    }
-    @media (max-width: 600px) {
-      .controls-side {
-        right: 0;
-        min-width: 48px;
-        padding: 12px 4px;
-        gap: 10px;
-      }
-      .controls-side button {
-        width: 44px; height: 44px; font-size: 1.6rem;
-      }
-      .page-indicator {
-        font-size: 1rem;
-        min-width: 42px;
-      }
+    @media (max-width:600px) {
+      #pdf-workspace { max-width: 100vw; max-height:60vh;}
+      #toolbar { flex-direction: column; gap:6px;}
     }
   </style>
 </head>
 <body>
-  <h2>ขีดเส้น PDF ทุกหน้า (แนวตั้ง) - ลากเส้นแต่ละหน้าได้ เลข index ต่อเนื่อง</h2>
-  <input type="file" id="pdf-upload" accept="application/pdf" />
-  <div class="controls-side">
-    <button id="btn-up" title="เลื่อนไปหน้าก่อนหน้า">⬆️</button>
-    <div class="page-indicator" id="page-indicator">1 / 1</div>
-    <button id="btn-down" title="เลื่อนไปหน้าถัดไป">⬇️</button>
-    <button id="btn-draw" class="active" title="โหมดเส้น">🖊️</button>
-    <button id="btn-pan" title="โหมดเลื่อน/ซูม">✋</button>
-    <button id="btn-undo" title="ลบเส้นล่าสุด">↩️</button>
-    <button id="btn-save" title="บันทึกเป็น PDF">💾</button>
+  <div id="toolbar">
+    <input type="file" id="pdf-upload" accept="application/pdf" />
+    <button id="save-btn">💾 บันทึก PDF</button>
   </div>
-  <div class="controls-side-spacer"></div>
-  <div id="pdf-container" class="pdf-container"></div>
-
+  <canvas id="pdf-workspace"></canvas>
+  <div id="hint">
+    <span>🖊️ วาด: นิ้วเดียวหรือคลิกเมาส์ | 🤏 แพน/ซูม: สองนิ้ว (pinch/drag)</span>
+  </div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
-    const input = document.getElementById('pdf-upload');
-    const pdfContainer = document.getElementById('pdf-container');
-    const btnDraw = document.getElementById('btn-draw');
-    const btnPan = document.getElementById('btn-pan');
-    const btnUndo = document.getElementById('btn-undo');
-    const btnSave = document.getElementById('btn-save');
-    const btnUp = document.getElementById('btn-up');
-    const btnDown = document.getElementById('btn-down');
-    const pageIndicator = document.getElementById('page-indicator');
+    // --- State
+    let pdfDoc = null, pdfPages = [], totalPages = 0;
+    let lines = []; // {page, startX, startY, endX, endY}
+    let pageRects = []; // [{x, y, w, h}]
+    let scale = 1, offsetX = 0, offsetY = 0;
+    let dragging = false, lastX = 0, lastY = 0;
+    let drawing = false, drawStart = {x:0,y:0}, drawPage = null;
+    let pinchLastDist = null, pinchLastCenter = null;
+    let workspaceW = 800, workspaceH = 1130;
+    const canvas = document.getElementById('pdf-workspace');
+    const ctx = canvas.getContext('2d');
 
-    let pdfDoc = null;
-    let totalPages = 0;
-    let pdfFingerprint = null;
-    let mode = 'draw'; // 'draw' หรือ 'pan'
-
-    let lines = {};
-    let canvases = [];
-    let pageStates = [];
-    let currentPageForScroll = 1;
-
-    function getNextLineIndex(page) {
-      let index = 0;
-      for (let i = 1; i < page; i++) {
-        index += (lines[i]?.length || 0);
-      }
-      index += (lines[page]?.length || 0);
-      return index + 1;
-    }
-
-    function saveLinesToStorage() {
-      if (!pdfFingerprint) return;
-      localStorage.setItem(`pdfLines_${pdfFingerprint}`, JSON.stringify({lines}));
-    }
-    function loadLinesFromStorage() {
-      if (!pdfFingerprint) return;
-      const data = localStorage.getItem(`pdfLines_${pdfFingerprint}`);
-      if (data) {
-        try {
-          const obj = JSON.parse(data);
-          lines = obj.lines || {};
-        } catch { lines = {}; }
-      }
-    }
-
-    function updatePageIndicator() {
-      if (!totalPages) {
-        pageIndicator.textContent = "- / -";
-      } else {
-        pageIndicator.textContent = currentPageForScroll + " / " + totalPages;
-      }
-    }
-
-    function scrollToPage(num) {
-      const wrap = document.querySelector(`.pdf-page-wrap:nth-child(${num})`);
-      if (wrap) {
-        wrap.scrollIntoView({ behavior: "smooth", block: "center" });
-        currentPageForScroll = num;
-        updatePageIndicator();
-      }
-    }
-
-    btnUp.onclick = () => {
-      if (!totalPages) return;
-      if (currentPageForScroll > 1) {
-        currentPageForScroll--;
-        scrollToPage(currentPageForScroll);
-      }
-    };
-    btnDown.onclick = () => {
-      if (!totalPages) return;
-      if (currentPageForScroll < totalPages) {
-        currentPageForScroll++;
-        scrollToPage(currentPageForScroll);
-      }
-    };
-
-    input.addEventListener('change', async (e) => {
+    // --- PDF Upload & Render
+    document.getElementById('pdf-upload').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      const fileReader = new FileReader();
-      fileReader.onload = async function () {
-        const typedArray = new Uint8Array(this.result);
-        pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
-        totalPages = pdfDoc.numPages;
-        pdfFingerprint = pdfDoc.fingerprints ? pdfDoc.fingerprints[0] : null;
-        loadLinesFromStorage();
-
-        pdfContainer.innerHTML = "";
-        canvases = [];
-        pageStates = [];
-        currentPageForScroll = 1;
-        updatePageIndicator();
-
-        for (let i = 1; i <= totalPages; i++) {
-          lines[i] = lines[i] || [];
-          await renderPage(i);
-        }
-        scrollToPage(1);
-      };
-      fileReader.readAsArrayBuffer(file);
+      pdfDoc = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
+      totalPages = pdfDoc.numPages;
+      pdfPages = [];
+      pageRects = [];
+      lines = [];
+      // Render all pages to images, stack vertically
+      let y = 0, maxW = 0;
+      for(let i=1;i<=totalPages;i++) {
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({scale:2});
+        const c = document.createElement('canvas');
+        c.width = viewport.width; c.height = viewport.height;
+        await page.render({canvasContext:c.getContext('2d'), viewport}).promise;
+        pdfPages.push({img: c, w: viewport.width, h: viewport.height});
+        pageRects.push({x:0, y, w: viewport.width, h: viewport.height});
+        y += viewport.height;
+        if(viewport.width>maxW) maxW=viewport.width;
+      }
+      workspaceW = maxW;
+      workspaceH = y;
+      scale = Math.min(window.innerWidth / workspaceW, window.innerHeight / workspaceH, 1);
+      offsetX = (canvas.width - workspaceW*scale)/2 || 0;
+      offsetY = 10;
+      resizeCanvas();
+      drawWorkspace();
     });
 
-    async function renderPage(pageNum) {
-      const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 2 });
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = viewport.width;
-      tempCanvas.height = viewport.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      await page.render({ canvasContext: tempCtx, viewport }).promise;
-
-      const pdfPageImage = new Image();
-      pdfPageImage.src = tempCanvas.toDataURL();
-
-      pdfPageImage.onload = () => {
-        const wrap = document.createElement('div');
-        wrap.className = 'pdf-page-wrap';
-        const canvas = document.createElement('canvas');
-        canvas.width = pdfPageImage.width;
-        canvas.height = pdfPageImage.height;
-        wrap.appendChild(canvas);
-        pdfContainer.appendChild(wrap);
-
-        canvases[pageNum] = canvas;
-        pageStates[pageNum] = {
-          offsetX: 0, offsetY: 0, scale: Math.min(1, window.innerWidth/pdfPageImage.width), isDrawing: false,
-          isPanning: false, panStartX: 0, panStartY: 0, lastDist: null,
-          startX: 0, startY: 0, img: pdfPageImage
-        };
-
-        drawCurrentView(pageNum);
-
-        canvas.addEventListener('mousedown', e => {
-          if (mode !== 'draw') return;
-          pageStates[pageNum].isDrawing = true;
-          const pos = getEventPos(e, pageNum);
-          pageStates[pageNum].startX = pos.x;
-          pageStates[pageNum].startY = pos.y;
-        });
-        canvas.addEventListener('mouseup', e => {
-          if (mode !== 'draw' || !pageStates[pageNum].isDrawing) return;
-          pageStates[pageNum].isDrawing = false;
-          const pos = getEventPos(e, pageNum);
-          const endX = pos.x, endY = pos.y;
-          const lineIndex = getNextLineIndex(pageNum);
-          lines[pageNum].push({startX: pageStates[pageNum].startX, startY: pageStates[pageNum].startY, endX, endY, index: lineIndex});
-          saveLinesToStorage();
-          drawCurrentView(pageNum);
-        });
-        canvas.addEventListener('mouseleave', e => {
-          if (mode !== 'draw') return;
-          pageStates[pageNum].isDrawing = false;
-        });
-        canvas.addEventListener('touchstart', e => {
-          if (mode !== 'draw') return;
-          e.preventDefault();
-          pageStates[pageNum].isDrawing = true;
-          const pos = getEventPos(e, pageNum);
-          pageStates[pageNum].startX = pos.x;
-          pageStates[pageNum].startY = pos.y;
-        }, { passive: false });
-        canvas.addEventListener('touchend', e => {
-          if (mode !== 'draw') return;
-          e.preventDefault();
-          if (!pageStates[pageNum].isDrawing) return;
-          pageStates[pageNum].isDrawing = false;
-          const pos = getEventPos(e, pageNum);
-          const endX = pos.x, endY = pos.y;
-          const lineIndex = getNextLineIndex(pageNum);
-          lines[pageNum].push({startX: pageStates[pageNum].startX, startY: pageStates[pageNum].startY, endX, endY, index: lineIndex});
-          saveLinesToStorage();
-          drawCurrentView(pageNum);
-        }, { passive: false });
-
-        // Pan/Zoom
-        canvas.addEventListener('touchstart', e => {
-          if (mode !== 'pan') return;
-          if (e.touches.length === 1) {
-            pageStates[pageNum].isPanning = true;
-            pageStates[pageNum].panStartX = e.touches[0].clientX;
-            pageStates[pageNum].panStartY = e.touches[0].clientY;
-          } else {
-            pageStates[pageNum].isPanning = false;
-          }
-          pageStates[pageNum].lastDist = null;
-        });
-        canvas.addEventListener('touchmove', e => {
-          if (mode !== 'pan') return;
-          e.preventDefault();
-          const touches = e.touches;
-          if (touches.length === 1 && pageStates[pageNum].isPanning) {
-            const dx = touches[0].clientX - pageStates[pageNum].panStartX;
-            const dy = touches[0].clientY - pageStates[pageNum].panStartY;
-            pageStates[pageNum].panStartX = touches[0].clientX;
-            pageStates[pageNum].panStartY = touches[0].clientY;
-            pageStates[pageNum].offsetX += dx;
-            pageStates[pageNum].offsetY += dy;
-            clampOffsets(pageNum);
-            drawCurrentView(pageNum);
-          } else if (touches.length === 2) {
-            const dist = getDistance(touches);
-            if (pageStates[pageNum].lastDist) {
-              let zoom = dist / pageStates[pageNum].lastDist;
-              let newScale = pageStates[pageNum].scale * zoom;
-              newScale = Math.min(Math.max(newScale, 0.5), 5);
-              const rect = canvas.getBoundingClientRect();
-              const centerX = (touches[0].clientX + touches[1].clientX) / 2 - rect.left;
-              const centerY = (touches[0].clientY + touches[1].clientY) / 2 - rect.top;
-              pageStates[pageNum].offsetX = centerX - ((centerX - pageStates[pageNum].offsetX) * (newScale / pageStates[pageNum].scale));
-              pageStates[pageNum].offsetY = centerY - ((centerY - pageStates[pageNum].offsetY) * (newScale / pageStates[pageNum].scale));
-              pageStates[pageNum].scale = newScale;
-              clampOffsets(pageNum);
-              drawCurrentView(pageNum);
-            }
-            pageStates[pageNum].lastDist = dist;
-          }
-        }, { passive: false });
-        canvas.addEventListener('touchend', e => {
-          if (mode !== 'pan') return;
-          if (e.touches.length === 0) pageStates[pageNum].isPanning = false;
-          pageStates[pageNum].lastDist = null;
-        });
-      };
+    function resizeCanvas() {
+      canvas.width = workspaceW;
+      canvas.height = workspaceH;
+      canvas.style.width = (workspaceW*scale) + "px";
+      canvas.style.height = (workspaceH*scale) + "px";
     }
 
-    function getEventPos(evt, pageNum) {
-      const canvas = canvases[pageNum];
-      const rect = canvas.getBoundingClientRect();
-      let clientX, clientY;
-      if (evt.touches && evt.touches.length > 0) {
-        clientX = evt.touches[0].clientX;
-        clientY = evt.touches[0].clientY;
-      } else if (evt.changedTouches && evt.changedTouches.length > 0) {
-        clientX = evt.changedTouches[0].clientX;
-        clientY = evt.changedTouches[0].clientY;
-      } else {
-        clientX = evt.clientX;
-        clientY = evt.clientY;
+    function drawWorkspace() {
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // Draw all PDF pages
+      for(let i=0;i<pdfPages.length;i++) {
+        const {img,w,h} = pdfPages[i];
+        ctx.drawImage(img,0,pageRects[i].y,w,h);
       }
-      const xInCanvas = (clientX - rect.left) * (canvas.width / rect.width);
-      const yInCanvas = (clientY - rect.top) * (canvas.height / rect.height);
-      return {
-        x: (xInCanvas - pageStates[pageNum].offsetX) / pageStates[pageNum].scale,
-        y: (yInCanvas - pageStates[pageNum].offsetY) / pageStates[pageNum].scale
-      };
-    }
-    function getDistance(touches) {
-      const dx = touches[0].clientX - touches[1].clientX;
-      const dy = touches[0].clientY - touches[1].clientY;
-      return Math.sqrt(dx*dx + dy*dy);
-    }
-    function clampOffsets(pageNum) {
-      const canvas = canvases[pageNum];
-      const img = pageStates[pageNum].img;
-      const maxOffsetX = 0, maxOffsetY = 0;
-      const imgWidthScaled = img.width * pageStates[pageNum].scale;
-      const imgHeightScaled = img.height * pageStates[pageNum].scale;
-      const minOffsetX = canvas.width - imgWidthScaled;
-      const minOffsetY = canvas.height - imgHeightScaled;
-      if (minOffsetX >= maxOffsetX) {
-        pageStates[pageNum].offsetX = (canvas.width - imgWidthScaled) / 2;
-      } else {
-        pageStates[pageNum].offsetX = Math.min(maxOffsetX, Math.max(minOffsetX, pageStates[pageNum].offsetX));
-      }
-      if (minOffsetY >= maxOffsetY) {
-        pageStates[pageNum].offsetY = (canvas.height - imgHeightScaled) / 2;
-      } else {
-        pageStates[pageNum].offsetY = Math.min(maxOffsetY, Math.max(minOffsetY, pageStates[pageNum].offsetY));
-      }
-    }
-    function drawCurrentView(pageNum) {
-      const canvas = canvases[pageNum];
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      const img = pageStates[pageNum].img;
-      clampOffsets(pageNum);
-
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      ctx.setTransform(pageStates[pageNum].scale, 0, 0, pageStates[pageNum].scale, pageStates[pageNum].offsetX, pageStates[pageNum].offsetY);
-      ctx.drawImage(img, 0, 0);
-
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2 / pageStates[pageNum].scale;
-      ctx.font = `${18 / pageStates[pageNum].scale}px sans-serif`;
-      ctx.fillStyle = 'blue';
-      for (let line of lines[pageNum] || []) {
+      // Draw lines
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 2;
+      ctx.font = "18px sans-serif";
+      ctx.fillStyle = "blue";
+      let idx = 1;
+      for(const l of lines) {
+        const rect = pageRects[l.page];
         ctx.beginPath();
-        ctx.moveTo(line.startX, line.startY);
-        ctx.lineTo(line.endX, line.endY);
+        ctx.moveTo(rect.x + l.startX, rect.y + l.startY);
+        ctx.lineTo(rect.x + l.endX, rect.y + l.endY);
         ctx.stroke();
-        ctx.fillText(line.index, line.endX + 5, line.endY);
+        ctx.fillText(idx, rect.x + l.endX + 5, rect.y + l.endY);
+        idx++;
       }
     }
 
-    btnDraw.onclick = () => {
-      mode = 'draw';
-      btnDraw.classList.add('active');
-      btnPan.classList.remove('active');
-      canvases.forEach(c => { if (c) c.style.cursor = 'crosshair'; });
-    };
-    btnPan.onclick = () => {
-      mode = 'pan';
-      btnDraw.classList.remove('active');
-      btnPan.classList.add('active');
-      canvases.forEach(c => { if (c) c.style.cursor = 'grab'; });
-    };
-    btnUndo.onclick = () => {
-      for (let i = totalPages; i >= 1; i--) {
-        if (lines[i] && lines[i].length > 0) {
-          lines[i].pop();
-          saveLinesToStorage();
-          drawCurrentView(i);
-          break;
+    // --- Utility for screen <-> workspace coord
+    function screenToWorkspace(x, y) {
+      const rect = canvas.getBoundingClientRect();
+      const wx = (x - rect.left) / scale - offsetX/scale;
+      const wy = (y - rect.top) / scale - offsetY/scale;
+      return {x: wx, y: wy};
+    }
+    function workspaceToScreen(wx, wy) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: wx*scale + offsetX + rect.left,
+        y: wy*scale + offsetY + rect.top
+      };
+    }
+    // --- Find page index by workspace y
+    function findPageByWorkspace(y) {
+      for(let i=0;i<pageRects.length;i++) {
+        if(y>=pageRects[i].y && y<pageRects[i].y+pageRects[i].h) return i;
+      }
+      return null;
+    }
+
+    // --- Drawing & Pan/Zoom events (pointer/touch)
+    // Mouse
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.ctrlKey || e.metaKey) return; // Forbid panning with ctrl/cmd (optional)
+      drawing = true;
+      const {x, y} = screenToWorkspace(e.clientX, e.clientY);
+      drawStart = {x, y};
+      drawPage = findPageByWorkspace(y);
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      if (drawing) {
+        // Draw preview line if needed
+      }
+    });
+    canvas.addEventListener('mouseup', (e) => {
+      if (!drawing) return;
+      drawing = false;
+      const {x, y} = screenToWorkspace(e.clientX, e.clientY);
+      const page = drawPage;
+      if (page !== null) {
+        const rect = pageRects[page];
+        lines.push({
+          page,
+          startX: drawStart.x - rect.x,
+          startY: drawStart.y - rect.y,
+          endX: x - rect.x,
+          endY: y - rect.y
+        });
+        drawWorkspace();
+      }
+    });
+
+    // Touch: distinguish 1 finger (draw), 2 fingers (pan/zoom)
+    let touchMode = null; // "draw" or "pan"
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        touchMode = "draw";
+        const {x, y} = screenToWorkspace(e.touches[0].clientX, e.touches[0].clientY);
+        drawStart = {x, y};
+        drawPage = findPageByWorkspace(y);
+        drawing = true;
+      } else if (e.touches.length === 2) {
+        touchMode = "pan";
+        dragging = true;
+        lastX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        lastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pinchLastDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        pinchLastCenter = { x: lastX, y: lastY };
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (touchMode === "draw" && drawing && e.touches.length === 1) {
+        // Draw preview if wanted
+      } else if (touchMode === "pan" && e.touches.length === 2) {
+        e.preventDefault();
+        const newX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const newY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        offsetX += (newX - lastX);
+        offsetY += (newY - lastY);
+        lastX = newX; lastY = newY;
+
+        // Zoom
+        const pinchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (pinchLastDist) {
+          let zoom = pinchDist / pinchLastDist;
+          // Zoom to the center between 2 fingers
+          const workspaceBefore = screenToWorkspace(pinchLastCenter.x, pinchLastCenter.y);
+          scale *= zoom;
+          scale = Math.max(0.2, Math.min(3, scale));
+          const workspaceAfter = screenToWorkspace(pinchLastCenter.x, pinchLastCenter.y);
+          offsetX += (workspaceAfter.x - workspaceBefore.x) * scale;
+          offsetY += (workspaceAfter.y - workspaceBefore.y) * scale;
+        }
+        pinchLastDist = pinchDist;
+        drawWorkspace();
+        resizeCanvas();
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (touchMode === "draw") {
+        if (drawing) {
+          drawing = false;
+          const touch = e.changedTouches[0];
+          const {x, y} = screenToWorkspace(touch.clientX, touch.clientY);
+          const page = drawPage;
+          if (page !== null) {
+            const rect = pageRects[page];
+            lines.push({
+              page,
+              startX: drawStart.x - rect.x,
+              startY: drawStart.y - rect.y,
+              endX: x - rect.x,
+              endY: y - rect.y
+            });
+            drawWorkspace();
+          }
         }
       }
-    };
+      touchMode = null;
+      dragging = false;
+      pinchLastDist = null;
+      pinchLastCenter = null;
+    });
 
-    btnSave.onclick = async function () {
+    // Pan/Zoom by mouse (Alt+drag for pan, Ctrl+wheel for zoom)
+    let mousePan = false;
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === "mouse" && e.button === 1) {
+        mousePan = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+      }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (mousePan) {
+        offsetX += e.clientX - lastX;
+        offsetY += e.clientY - lastY;
+        lastX = e.clientX; lastY = e.clientY;
+        drawWorkspace();
+        resizeCanvas();
+      }
+    });
+    canvas.addEventListener('pointerup', (e) => { mousePan = false; });
+
+    canvas.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const mouse = screenToWorkspace(e.clientX, e.clientY);
+        let zoom = e.deltaY < 0 ? 1.08 : 0.92;
+        const oldScale = scale;
+        scale *= zoom;
+        scale = Math.max(0.2, Math.min(3, scale));
+        offsetX -= (mouse.x * scale - mouse.x * oldScale);
+        offsetY -= (mouse.y * scale - mouse.y * oldScale);
+        drawWorkspace();
+        resizeCanvas();
+      }
+    }, { passive: false });
+
+    // --- SAVE PDF ---
+    document.getElementById('save-btn').onclick = async function () {
       if (!pdfDoc) return alert('กรุณาอัปโหลด PDF ก่อน');
       const { jsPDF } = window.jspdf;
-      const page = await pdfDoc.getPage(1);
-      const viewport = page.getViewport({ scale: 2 });
-      const pageWidth = viewport.width;
-      const pageHeight = viewport.height;
-      const pdf = new jsPDF({
-        unit: 'pt',
-        format: [pageWidth, pageHeight]
-      });
+      let pdf = null;
 
-      for (let i = 1; i <= totalPages; i++) {
+      // เตรียมขนาดและวาดใหม่ทุกหน้า
+      for(let i=1;i<=totalPages;i++) {
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 2 });
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = pageWidth;
-        tempCanvas.height = pageHeight;
+        tempCanvas.width = viewport.width;
+        tempCanvas.height = viewport.height;
         const tempCtx = tempCanvas.getContext('2d');
-        const pg = await pdfDoc.getPage(i);
-        const vp = pg.getViewport({ scale: 2 });
-        await pg.render({ canvasContext: tempCtx, viewport: vp }).promise;
-        tempCtx.strokeStyle = 'red';
+        await page.render({ canvasContext: tempCtx, viewport }).promise;
+        tempCtx.strokeStyle = "red";
         tempCtx.lineWidth = 2;
-        tempCtx.font = `18px sans-serif`;
-        tempCtx.fillStyle = 'blue';
-        for (let line of lines[i] || []) {
+        tempCtx.font = "18px sans-serif";
+        tempCtx.fillStyle = "blue";
+        let idx = 1;
+        for(let j=0;j<lines.length;j++) {
+          const l = lines[j];
+          if (l.page !== i-1) continue;
           tempCtx.beginPath();
-          tempCtx.moveTo(line.startX, line.startY);
-          tempCtx.lineTo(line.endX, line.endY);
+          tempCtx.moveTo(l.startX, l.startY);
+          tempCtx.lineTo(l.endX, l.endY);
           tempCtx.stroke();
-          tempCtx.fillText(line.index, line.endX + 5, line.endY);
+          tempCtx.fillText(idx, l.endX + 5, l.endY);
+          idx++;
         }
         const imgData = tempCanvas.toDataURL('image/png');
-        if (i > 1) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight);
+        if (i === 1) {
+          pdf = new jsPDF({
+            unit: 'pt',
+            format: [viewport.width, viewport.height]
+          });
+        } else {
+          pdf.addPage();
+        }
+        pdf.addImage(imgData, 'PNG', 0, 0, viewport.width, viewport.height);
       }
       pdf.save('ไฟล์ที่ขีดเส้นแล้ว.pdf');
     };
 
-    // Scroll to correct page when user scrolls manually
-    let scrollTimeout = null;
-    pdfContainer.addEventListener('scroll', function () {
-      if (scrollTimeout) clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => {
-        let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
-        let best = 1, bestDist = Infinity;
-        for (let i = 0; i < pageWraps.length; ++i) {
-          const rect = pageWraps[i].getBoundingClientRect();
-          const dist = Math.abs(rect.top + rect.bottom - window.innerHeight);
-          if (dist < bestDist) {
-            best = i + 1;
-            bestDist = dist;
-          }
-        }
-        currentPageForScroll = best;
-        updatePageIndicator();
-      }, 250);
-    }, { passive: true });
-
-    // For normal scroll (not inside pdfContainer, but window), also update indicator
-    window.addEventListener('scroll', function () {
-      let pageWraps = Array.from(document.querySelectorAll('.pdf-page-wrap'));
-      let best = 1, bestDist = Infinity;
-      for (let i = 0; i < pageWraps.length; ++i) {
-        const rect = pageWraps[i].getBoundingClientRect();
-        const dist = Math.abs(rect.top + rect.bottom - window.innerHeight);
-        if (dist < bestDist) {
-          best = i + 1;
-          bestDist = dist;
-        }
+    // --- Resize on window
+    window.addEventListener('resize',()=>{
+      if(pdfPages.length>0){
+        scale = Math.min(window.innerWidth / workspaceW, window.innerHeight / workspaceH, 1);
+        resizeCanvas();
+        drawWorkspace();
       }
-      currentPageForScroll = best;
-      updatePageIndicator();
-    }, { passive: true });
-
+    });
   </script>
 </body>
 </html>
